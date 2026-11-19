@@ -3,7 +3,7 @@ import { fmt } from '../engine/engine.js';
 
 const Sw = ({ c }) => <i className="sw" style={{ background: c }} />;
 
-export default function Readout({ scene }) {
+export default function Readout({ scene, move, metrics }) {
   const r = scene.readout;
   const L = scene.lights;
   const key = L.find((l) => l.role === 'key');
@@ -34,6 +34,30 @@ export default function Readout({ scene }) {
         {pr.length > 0 && <span><Sw c={pr[0].color} />Prac: {pr[0].gel ? 'neon' : pr[0].kelvin + 'K'}{pr.length > 1 ? ` ×${pr.length}` : ''}</span>}
         <span className="dim">WB {r.wb}K · tone push {r.gelPush.name}</span>
       </div>
+
+      {move && move.type !== 'static' && (
+        <div className="move-box">
+          <div className="move-head"><b>{move.label}</b><span className="dim">{fmt(move.duration, 1)} s · peak {fmt(move.speedPeak, 2)} m/s</span></div>
+          <table className="stats">
+            <tbody>
+              <tr><th></th><th>start</th><th>now</th><th>end</th></tr>
+              {[
+                ['Distance', (m) => `${fmt(m.dist, 2)} m`],
+                ['Lens height', (m) => `${fmt(m.height, 2)} m`],
+                ['Tilt', (m) => `${fmt(m.tiltDeg)}°`],
+                ['Focus', (m) => `${fmt(m.focus, 2)} m`],
+                ['DoF', (m) => (m.dof.total < 1 ? `${fmt(m.dof.total * 100, 0)} cm` : Number.isFinite(m.dof.total) ? `${fmt(m.dof.total, 2)} m` : '∞')],
+                ['Face size', (m) => `${fmt(m.faceSize, 0)}%`],
+                ['Neg. space', (m) => `${fmt(m.negSpace, 0)}%`],
+                ['BG scale', (m) => `${fmt(m.bgScale * 100, 0)}%`],
+              ].map(([k, f]) => (
+                <tr key={k}><th>{k}</th><td className="dim">{f(move.start)}</td><td>{f(metrics)}</td><td className="dim">{f(move.end)}</td></tr>
+              ))}
+            </tbody>
+          </table>
+          {move.gear.map((g) => <div key={g} className="move-gear">⚙ {g}</div>)}
+        </div>
+      )}
 
       <table className="stats">
         <tbody>

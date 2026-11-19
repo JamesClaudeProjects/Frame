@@ -1,9 +1,10 @@
-import React, { useMemo, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { compute, fmt } from './engine/engine.js';
 import { TIMES, ENVS, TONES, BLOCKING, SENSORS, APERTURES } from './engine/tables.js';
 import FlatLay from './components/FlatLay.jsx';
 import Viewfinder from './components/Viewfinder.jsx';
 import Readout from './components/Readout.jsx';
+import { MOVES } from './engine/move.js';
 
 const FOCAL_MARKS = [14, 18, 24, 35, 50, 85, 135];
 
@@ -26,10 +27,45 @@ export default function App() {
   const [inp, setInp] = useState({
     time: 'golden', env: 'interior', blocking: 'one', tone: 'melancholy',
     focal: 50, aperture: 2, aspect: '2.39:1', seed: 1,
+    move: 'push', moveAmt: 0.6, moveDur: null,
   });
   const [layers, setLayers] = useState({ fov: true, dof: true, beams: true, shadows: true, guides: true, labels: true });
   const set = (k) => (v) => setInp((s) => ({ ...s, [k]: v }));
   const scene = useMemo(() => compute(inp), [inp]);
+  const move = scene.move;
+
+  // --- playback: t ∈ [0, 1] across the move's real duration
+  const [t, setT] = useState(0);
+  const [playing, setPlaying] = useState(false);
+  useEffect(() => { setT(0); setPlaying(false); }, [inp.move]);
+  const tRef = useRef(0);
+  tRef.current = t;
+  useEffect(() => {
+    if (!playing) return undefined;
+    let raf, last = performance.now();
+    const tick = (now) => {
+      const n = Math.min(tRef.current + (now - last) / 1000 / move.duration, 1);
+      last = now;
+      tRef.current = n;
+      setT(n);
+      if (n >= 1) setPlaying(false); else raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, [playing, move]);
+  const pose = useMemo(() => move.poseAt(t), [move, t]);
+  const metrics = useMemo(() => move.metricsAt(t), [move, t]);
+  const moving = move.type !== 'static';
+  const play = () => { if (t >= 1) setT(0); setPlaying((p) => !p); };
+  const transport = moving && (
+    <div className="transport">
+      <button type="button" onClick={() => { setPlaying(false); setT(0); }} title="Start mark">⏮</button>
+      <button type="button" className="play" onClick={play} title="Play / pause">{playing ? '❚❚' : '▶'}</button>
+      <button type="button" onClick={() => { setPlaying(false); setT(1); }} title="End mark">⏭</button>
+      <input type="range" min={0} max={1000} value={Math.round(t * 1000)} onChange={(e) => { setPlaying(false); setT(+e.target.value / 1000); }} aria-label="Scrub move" />
+      <span className="tc">{fmt(t * move.duration, 1)}s / {fmt(move.duration, 0)}s</span>
+    </div>
+  );
   const svgRef = useRef(null);
   const apIdx = APERTURES.indexOf(inp.aperture);
 
@@ -52,7 +88,7 @@ export default function App() {
         </div>
         <div className="top-meta">
           <span>{TIMES[inp.time].label}</span><span>{ENVS[inp.env].label}</span><span>{TONES[inp.tone].label}</span>
-          <span>{inp.focal}mm f/{inp.aperture}</span><span>{inp.aspect}</span>
+          <span>{inp.focal}mm f/{inp.aperture}</span><span>{inp.aspect}</span>{moving && <span>{move.label}</span>}
         </div>
       </header>
 
@@ -78,6 +114,22 @@ export default function App() {
           </div>
           <Seg label="Aspect Ratio" value={inp.aspect} options={Object.fromEntries(Object.keys(SENSORS).map((k) => [k, k]))} onChange={set('aspect')} />
 
+          <h2>Camera Move</h2>
+          <Seg label="Move" hint="pose over time" value={inp.move} options={MOVES} onChange={set('move')} />
+          {['push', 'pull', 'truck', 'pedestal'].includes(inp.move) && (
+            <div className="ctl">
+              <div className="ctl-label">{inp.move === 'pedestal' ? 'Vertical range' : 'Travel'} <b>{inp.move === 'pedestal' ? `${fmt(move.lift, 2)} m` : `${fmt(move.travel, 2)} m`}</b></div>
+              <input type="range" min={0} max={100} value={Math.round(inp.moveAmt * 100)} onChange={(e) => set('moveAmt')(+e.target.value / 100)} />
+            </div>
+          )}
+          {moving && (
+            <div className="ctl">
+              <div className="ctl-label">Shot length <b>{fmt(move.duration, 1)} s{inp.moveDur == null ? ' · auto' : ''}</b></div>
+              <input type="range" min={2} max={20} step={0.5} value={move.duration} onChange={(e) => set('moveDur')(+e.target.value)} />
+              {inp.moveDur != null && <div className="marks"><button type="button" onClick={() => set('moveDur')(null)}>reset to tone default</button></div>}
+            </div>
+          )}
+
           <button className="primary" type="button" onClick={() => setInp((s) => ({ ...s, seed: s.seed + 1 }))}>
             ↻ Generate New Variation
           </button>
@@ -93,16 +145,16 @@ export default function App() {
         </aside>
 
         <section className="panel canvas">
-          <FlatLay ref={svgRef} scene={scene} layers={layers} />
-          {scene.notes.length > 0 && (
-            <div className="notes">{scene.notes.map((n, i) => <span key={i}>⚑ {n}</span>)}</div>
+          <FlatLay ref={svgRef} scene={scene} layers={layers} cam={pose} />
+          {scene.notes.length + move.notes.length > 0 && (
+            <div className="notes">{[...scene.notes, ...move.notes].map((n, i) => <span key={i}>⚑ {n}</span>)}</div>
           )}
         </section>
 
         <aside className="panel side">
           <h2>Through the Lens</h2>
-          <Viewfinder scene={scene} />
-          <Readout scene={scene} />
+          <Viewfinder scene={scene} cam={pose} metrics={moving ? metrics : null} transport={transport} />
+          <Readout scene={scene} move={move} metrics={metrics} />
         </aside>
 
         <section className="panel theory">

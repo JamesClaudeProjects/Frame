@@ -3,6 +3,7 @@
 // Angles are radians in the XY plane (atan2 convention).
 
 import { TIMES, ENVS, TONES, SENSORS, NEON } from './tables.js';
+import { solveMove } from './move.js';
 import { renderKelvin, shiftKelvin, nearestGel, mired, describeShift } from './color.js';
 
 const DEG = Math.PI / 180;
@@ -65,7 +66,10 @@ export function blurDisc(fmm, N, sM, xM) {
 
 /** Pinhole projection of a world point (x, y, height h) to normalised frame coords (0..1, y down). */
 export function project(cam, pt, h) {
-  const dx = pt.x - cam.pos.x, dz = pt.y - cam.pos.y, dy = h - cam.height;
+  // yaw: rotation of the lens axis from +Y toward +X (0 = looking straight down the set)
+  const yaw = cam.yaw || 0, cy = Math.cos(yaw), sy = Math.sin(yaw);
+  const wx = pt.x - cam.pos.x, wz = pt.y - cam.pos.y, dy = h - cam.height;
+  const dx = wx * cy - wz * sy, dz = wx * sy + wz * cy;
   const cp = Math.cos(cam.pitch), sp = Math.sin(cam.pitch);
   const zc = dz * cp + dy * sp;
   const yc = dy * cp - dz * sp;
@@ -475,7 +479,7 @@ export function compute(inp) {
   const vTarget = (M.eyeFrac + J(0.02)) * S.h;
   const pitch = Math.atan2(eyeH - camH, P.y) - Math.atan(vTarget / f);
   const dutch = M.dutch ? (M.dutch + J(2)) * (rng() < 0.5 ? 1 : -1) : 0;
-  const camera = { pos: V(0, 0), height: camH, pitch, dutch, f, N, sensor: S, fovH, fovV };
+  const camera = { pos: V(0, 0), height: camH, pitch, yaw: 0, dutch, f, N, sensor: S, fovH, fovV, focus: P.y, vTarget, eyeH };
 
   const dof = depthOfField(f, N, P.y);
   const bgBlur = blurDisc(f, N, P.y, bgY);
@@ -486,25 +490,7 @@ export function compute(inp) {
   const noseMag = P.y < 2 ? (P.y / (P.y - 0.1) - 1) * 100 : 0;
 
   // --- Composition (measured through the projected lens) --------------------
-  const boxes = subjects.map((s) => {
-    const pts = [];
-    const side = dir(s.facing + Math.PI / 2);
-    [[0.24, 1.48], [-0.24, 1.48], [0.18, 0], [-0.18, 0]].forEach(([o, h]) => {
-      const p = project(camera, add(s, mul(side, o)), h);
-      if (p) pts.push(p);
-    });
-    const top = project(camera, s, 1.8);
-    if (top) pts.push(top);
-    if (!pts.length) return null;
-    const xs = pts.map((p) => p.x), ys = pts.map((p) => p.y);
-    return { x0: Math.min(...xs), x1: Math.max(...xs), y0: Math.min(...ys), y1: Math.max(...ys), primary: s.primary, extra: s.extra };
-  });
-  const clip01 = (b) => b && { x0: clamp(b.x0, 0, 1), x1: clamp(b.x1, 0, 1), y0: clamp(b.y0, 0, 1), y1: clamp(b.y1, 0, 1) };
-  const occ = rasterCoverage(boxes.filter((b) => b && !b.extra).map(clip01));
-  const negSpace = (1 - occ) * 100;
-  const pBox = boxes[0];
-  const headroom = pBox ? pBox.y0 * 100 : 0;
-  const pCenterX = pBox ? ((pBox.x0 + pBox.x1) / 2) * 100 : 50;
+  const { negSpace, headroom, pCenterX, pHeight, pBox } = measureFrame(camera, subjects);
   const tiltDeg = pitch / DEG;
 
   // --- Exposure --------------------------------------------------------------
@@ -549,7 +535,7 @@ export function compute(inp) {
     practicals: practicals.filter((p) => p.lit !== false).map(kStr),
     gelPush: nearestGel(M.mired),
     fovH: fovH / DEG, fovV: fovV / DEG, ffEq, D: P.y, dof, bgBlurPct, fgBlurPct, bgScale, noseMag,
-    negSpace, headroom, pCenterX, pHeight: pBox ? clamp(pBox.y1, 0, 1) - clamp(pBox.y0, 0, 1) : 0, tiltDeg, camH, dutch,
+    negSpace, headroom, pCenterX, pHeight, tiltDeg, camH, dutch,
     keyLux, fillLux: keyLux / ratio, rimLux: rim && rim.stops != null ? keyLux * Math.pow(2, rim.stops) : null,
     ndText, unitText, sep, proxemics: blocking === 'two' ? proxemic(sep) : null,
     shadow: shadows.find((x) => x.light === 'key') ?? shadows[0], sensor: S,
@@ -558,13 +544,43 @@ export function compute(inp) {
   const ctx = { inp, T, E, M, S, key, rim, fill, neg, practicals, sun, subjects, readout, softness, notes, blocking, wb, keyOffDeg, faceOffDeg, shortSide, lam };
   const theory = synthesize(ctx);
 
-  return { camera, subjects, lights, set, shadows, dof, readout, theory, notes, P, ls, lineOfAction: blocking === 'two' ? { a: subjects[0], b: subjects[1] } : null, bgY, inp };
+  const scene = { camera, subjects, lights, set, shadows, dof, readout, theory, notes, P, ls, lineOfAction: blocking === 'two' ? { a: subjects[0], b: subjects[1] } : null, bgY, inp };
+  scene.move = solveMove(scene, inp);
+  if (scene.move.theory) theory.push(scene.move.theory);
+  return scene;
 }
 
 function practical(kind, pos, name, k, wb, stops) {
   return {
     id: 'prac-' + Math.round(pos.x * 100) + '-' + Math.round(pos.y * 100), role: 'practical', modifier: kind, name, pos, aim: pos,
     kelvin: k, color: k ? renderKelvin(k, wb) : '#fff', stops, lit: stops !== null, label: 'PRAC', size: 0.3, dist: 0,
+  };
+}
+
+/** Measure framing through a camera pose: negative space, headroom, subject position/height. */
+export function measureFrame(camera, subjects) {
+  const boxes = subjects.map((s) => {
+    const pts = [];
+    const side = dir(s.facing + Math.PI / 2);
+    [[0.24, 1.48], [-0.24, 1.48], [0.18, 0], [-0.18, 0]].forEach(([o, h]) => {
+      const p = project(camera, add(s, mul(side, o)), h);
+      if (p) pts.push(p);
+    });
+    const top = project(camera, s, 1.8);
+    if (top) pts.push(top);
+    if (!pts.length) return null;
+    const xs = pts.map((p) => p.x), ys = pts.map((p) => p.y);
+    return { x0: Math.min(...xs), x1: Math.max(...xs), y0: Math.min(...ys), y1: Math.max(...ys), primary: s.primary, extra: s.extra };
+  });
+  const clip01 = (b) => b && { x0: clamp(b.x0, 0, 1), x1: clamp(b.x1, 0, 1), y0: clamp(b.y0, 0, 1), y1: clamp(b.y1, 0, 1) };
+  const occ = rasterCoverage(boxes.filter((b) => b && !b.extra).map(clip01));
+  const pBox = boxes[0];
+  return {
+    negSpace: (1 - occ) * 100,
+    headroom: pBox ? pBox.y0 * 100 : 0,
+    pCenterX: pBox ? ((pBox.x0 + pBox.x1) / 2) * 100 : 50,
+    pHeight: pBox ? clamp(pBox.y1, 0, 1) - clamp(pBox.y0, 0, 1) : 0,
+    pBox,
   };
 }
 

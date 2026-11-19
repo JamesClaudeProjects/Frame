@@ -8,8 +8,8 @@ const SKY = {
 const GROUND = { grass: '#1e281a', asphalt: '#1d1e22', wet: '#121119', floor: '#2a221d', void: '#060607' };
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 
-export default function Viewfinder({ scene }) {
-  const cam = scene.camera;
+export default function Viewfinder({ scene, cam: camPose, metrics, transport }) {
+  const cam = camPose ?? scene.camera;
   const S = cam.sensor;
   const VW = 560, VH = Math.round(VW / S.ratio);
   const P = (pt, h) => {
@@ -17,8 +17,8 @@ export default function Viewfinder({ scene }) {
     return p && { x: p.x * VW, y: p.y * VH, z: p.z };
   };
   const time = scene.inp.time;
-  const blurPx = (zM) => clamp((blurDisc(cam.f, cam.N, scene.P.y, zM) / S.h) * VH * 0.5, 0, 18);
-  const bgBlur = blurPx(scene.bgY);
+  const blurPx = (zM) => clamp((blurDisc(cam.f, cam.N, cam.focus ?? scene.P.y, zM) / S.h) * VH * 0.5, 0, 18);
+  const bgBlur = blurPx(scene.bgY - cam.pos.y);
 
   // horizon
   const hz = P({ x: 0, y: 5000 }, cam.height);
@@ -138,7 +138,7 @@ export default function Viewfinder({ scene }) {
     const kp = keyFor.modifier === 'sun' ? { x: s.x + Math.cos(keyFor.az) * 50, y: s.y + Math.sin(keyFor.az) * 50 } : keyFor.pos;
     const kImg = P(kp, 1.62) ?? { x: kp.x > s.x ? VW * 4 : -VW * 4 };
     const litRight = kImg.x > head.x;
-    const toCam = Math.atan2(-s.y, -s.x), toKey = Math.atan2(kp.y - s.y, kp.x - s.x);
+    const toCam = Math.atan2(cam.pos.y - s.y, cam.pos.x - s.x), toKey = Math.atan2(kp.y - s.y, kp.x - s.x);
     const off = Math.abs(Math.atan2(Math.sin(toKey - toCam), Math.cos(toKey - toCam))) / Math.PI; // 0 = frontal, 1 = from behind
     const term = clamp(1 - off, 0.05, 0.95);
     const gid = `hg${i}`;
@@ -173,7 +173,7 @@ export default function Viewfinder({ scene }) {
   });
 
   const blurLevels = [...new Set(scene.subjects.map((s) => { const h = P(s, 1.62); return h ? Math.round(blurPx(h.z) * 2) : 0; }))];
-  const r = scene.readout;
+  const r = metrics ?? scene.readout;
   const sky = SKY[time];
   const groundC = GROUND[scene.set.ground];
 
@@ -221,7 +221,10 @@ export default function Viewfinder({ scene }) {
         {cam.dutch ? <span>dutch {fmt(cam.dutch)}°</span> : null}
         <span>neg-space {fmt(r.negSpace, 0)}%</span>
         <span>headroom {fmt(r.headroom, 0)}%</span>
+        {metrics && <span>dist {fmt(metrics.dist, 2)}m</span>}
+        {metrics && <span>focus {fmt(metrics.focus, 2)}m</span>}
       </div>
+      {transport}
     </div>
   );
 }

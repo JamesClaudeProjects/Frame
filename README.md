@@ -32,3 +32,17 @@ npm run dev
 | Composition | Negative space and headroom measured by rasterising the projected subject bounds |
 
 **Generate New Variation** reseeds a deterministic PRNG. It changes subject offsets, which third the subject sits on, light angles (±10°), dialogue stagger and crowd positions. The tone's rules stay the same.
+
+## Camera moves (Phase 1)
+
+`src/engine/move.js` treats a move as a camera pose over time `t ∈ [0, 1]` with smoothstep easing (peak speed = 1.5× average). Each move is anchored to the solved hero frame: push-in, truck and pedestal **end** on it, and a pull-out **starts** on it.
+
+| Move | What changes |
+|---|---|
+| Push In / Pull Out | Dolly distance; tilt re-solved each frame to hold the eyeline; focus follows the subject |
+| Truck | Lateral position with no pan, producing parallax between subject and background (and an off-frame reveal at high travel) |
+| Pedestal | Lens height; tilt re-solved so a low-to-high move flips the power relationship partway through |
+| Rack Focus | Focus distance between two computed targets (subject ↔ second actor, watching extra, practical or background) |
+
+The plot draws the dolly track, ghost frustums at both marks, pedestal travel and focus marks. A transport under the viewfinder plays or scrubs the move in real time. The readout compares start, now and end values (distance, height, tilt, focus, DoF, face size, negative space, background scale) and lists the gear needed. Room and alley walls limit travel, and moves that are too fast or too slow are flagged.
+

@@ -1,5 +1,5 @@
 import React, { forwardRef } from 'react';
-import { fmt } from '../engine/engine.js';
+import { fmt, depthOfField } from '../engine/engine.js';
 import { renderKelvin } from '../engine/color.js';
 
 const W = 1000, H = 720;
@@ -17,6 +17,8 @@ function useFrame(scene) {
   if (['studio', 'neon'].includes(scene.set.kind) || (scene.set.kind === 'alley' && scene.bgY - scene.P.y < 20)) pts.push({ x: 0, y: scene.bgY + 0.6 });
   const sunL = scene.lights.find((l) => l.modifier === 'sun');
   if (sunL) pts.push(sunL.pos);
+  // the whole move must fit, so the plot doesn't re-scale during playback
+  if (scene.move) [scene.move.A, scene.move.B].forEach((p) => pts.push({ x: p.x, y: p.y - 0.8 }));
   let x0 = Math.min(...pts.map((p) => p.x)), x1 = Math.max(...pts.map((p) => p.x));
   let y0 = Math.min(...pts.map((p) => p.y)), y1 = Math.max(...pts.map((p) => p.y));
   const pad = Math.max(1.1, (y1 - y0) * 0.08);
@@ -30,19 +32,22 @@ function useFrame(scene) {
 
 const halo = { paintOrder: 'stroke', stroke: '#0a0b0e', strokeWidth: 3.5, strokeLinejoin: 'round' };
 
-const FlatLay = forwardRef(function FlatLay({ scene, layers }, ref) {
+const FlatLay = forwardRef(function FlatLay({ scene, layers, cam: camPose }, ref) {
   const { k, T, inv } = useFrame(scene);
-  const cam = scene.camera;
-  const camS = T({ x: 0, y: 0 });
+  const cam = camPose ?? scene.camera;
+  const cp = cam.pos;
+  const camS = T(cp);
   const tanH = Math.tan(cam.fovH / 2);
   const farTop = inv(0, -20).y; // world y at top of canvas
-  const coneLen = Math.max(farTop, scene.P.y + 2) * 1.05;
-  const L = T({ x: -coneLen * tanH, y: coneLen }), R = T({ x: coneLen * tanH, y: coneLen });
+  const farY = Math.max(farTop, scene.P.y + 2) * 1.05;
+  const coneLen = farY - cp.y;
+  const L = T({ x: cp.x - coneLen * tanH, y: farY }), R = T({ x: cp.x + coneLen * tanH, y: farY });
   const conePath = `M${camS.x},${camS.y} L${L.x},${L.y} L${R.x},${R.y} Z`;
   const icon = clamp(k * 0.32, 9, 17);
   const gridStep = [0.5, 1, 2, 5, 10].find((s) => s * k >= 30) ?? 10;
   const inv0 = inv(0, 0), inv1 = inv(W, H);
-  const dof = scene.dof;
+  const dof = depthOfField(cam.f, cam.N, cam.focus ?? scene.P.y);
+  const focusY = cp.y + (cam.focus ?? scene.P.y);
   const yToS = (y) => T({ x: 0, y }).y;
   const wb = scene.readout.wb;
 
@@ -63,7 +68,7 @@ const FlatLay = forwardRef(function FlatLay({ scene, layers }, ref) {
   const isPrincipal = (sh) => principals.some((p) => p.x === sh.from.x && p.y === sh.from.y);
   const obstacles = scene.subjects.map((s) => { const c = T(s); const r = Math.max(0.3 * k, 12); return { x0: c.x - r, y0: c.y - r, x1: c.x + r, y1: c.y + r }; });
   obstacles.push({ x0: camS.x - 18, y0: camS.y - 16, x1: camS.x + 300, y1: camS.y + 22 });
-  const ray = (a, l) => T({ x: Math.sin(a) * l, y: Math.cos(a) * l });
+  const ray = (a, l) => T({ x: cp.x + Math.sin(a) * l, y: cp.y + Math.cos(a) * l });
 
   return (
     <svg ref={ref} viewBox={`0 0 ${W} ${H}`} className="flatlay" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Top-down lighting plot">
@@ -113,7 +118,7 @@ const FlatLay = forwardRef(function FlatLay({ scene, layers }, ref) {
           {layers.guides && (
             <g className="guide">
               {[-thirdAng, thirdAng].map((a, i) => { const e = ray(a, coneLen); return <line key={i} x1={camS.x} y1={camS.y} x2={e.x} y2={e.y} />; })}
-              <line x1={camS.x} y1={camS.y} x2={camS.x} y2={T({ x: 0, y: coneLen }).y} strokeDasharray="2 6" />
+              <line x1={camS.x} y1={camS.y} x2={camS.x} y2={T({ x: cp.x, y: farY }).y} strokeDasharray="2 6" />
             </g>
           )}
         </g>
@@ -123,7 +128,7 @@ const FlatLay = forwardRef(function FlatLay({ scene, layers }, ref) {
       {layers.dof && (
         <g clipPath="url(#cone)">
           {(() => {
-            const nearS = yToS(dof.near), farS = Number.isFinite(dof.far) ? yToS(Math.min(dof.far, coneLen)) : -50;
+            const nearS = yToS(cp.y + dof.near), farS = Number.isFinite(dof.far) ? yToS(cp.y + Math.min(dof.far, coneLen)) : -50;
             const fall = Math.max((nearS - farS) * 0.8, 14);
             return (
               <>
@@ -132,16 +137,16 @@ const FlatLay = forwardRef(function FlatLay({ scene, layers }, ref) {
                 <rect x={0} width={W} y={farS} height={Math.max(nearS - farS, 1.5)} fill="#7fd3ff" opacity="0.2" />
                 <line x1={0} x2={W} y1={nearS} y2={nearS} stroke="#7fd3ff" strokeWidth="1" strokeDasharray="5 4" opacity="0.8" />
                 {Number.isFinite(dof.far) && <line x1={0} x2={W} y1={farS} y2={farS} stroke="#7fd3ff" strokeWidth="1" strokeDasharray="5 4" opacity="0.8" />}
-                <line x1={0} x2={W} y1={yToS(scene.P.y)} y2={yToS(scene.P.y)} stroke="#7fd3ff" strokeWidth="1.6" />
+                <line x1={0} x2={W} y1={yToS(focusY)} y2={yToS(focusY)} stroke="#7fd3ff" strokeWidth="1.6" />
               </>
             );
           })()}
         </g>
       )}
       {layers.dof && layers.labels && (() => {
-        const y = yToS(scene.P.y);
-        const xL = T({ x: -scene.P.y * tanH, y: scene.P.y }).x;
-        const t = `FOCUS ${fmt(scene.P.y, 2)}m · DoF ${dof.total < 1 ? fmt(dof.total * 100, 0) + 'cm' : Number.isFinite(dof.total) ? fmt(dof.total, 2) + 'm' : '→∞'}`;
+        const y = yToS(focusY);
+        const xL = T({ x: cp.x - (focusY - cp.y) * tanH, y: focusY }).x;
+        const t = `FOCUS ${fmt(focusY - cp.y, 2)}m · DoF ${dof.total < 1 ? fmt(dof.total * 100, 0) + 'cm' : Number.isFinite(dof.total) ? fmt(dof.total, 2) + 'm' : '→∞'}`;
         const w = t.length * 6.3;
         labels.push({ ax: xL, ay: y, x: Math.max(8, xL - w - 8), y: y + 4, lines: [{ t, cls: 'lbl lbl-dof' }] });
         return null;
@@ -197,6 +202,8 @@ const FlatLay = forwardRef(function FlatLay({ scene, layers }, ref) {
       {scene.lights.map((l) => <Fixture key={'fx' + l.id} l={l} T={T} k={k} icon={icon} />)}
       {layers.labels && scene.lights.forEach((l) => { const lb = fixtureLabel(l, T, k, icon); if (lb) labels.push(lb); })}
 
+      {scene.move && scene.move.type !== 'static' && <MovePath move={scene.move} T={T} k={k} tanH={tanH} farY={farY} labels={layers.labels ? labels : null} />}
+
       {/* Camera */}
       <g transform={`translate(${camS.x},${camS.y})`}>
         <rect x={-15} y={-2} width={30} height={22} rx={3} fill="#1b1f27" stroke="#e9eef5" strokeWidth="1.5" />
@@ -204,7 +211,7 @@ const FlatLay = forwardRef(function FlatLay({ scene, layers }, ref) {
         <circle cx={0} cy={9} r={4} fill="#e05757" />
         {layers.labels && (
           <text x={22} y={10} className="lbl" fill="#e9eef5" style={halo}>
-            A-CAM · {cam.f}mm · f/{cam.N} · {fmt(cam.fovH / DEG)}° H · {fmt(cam.height, 2)}m{cam.dutch ? ` · dutch ${fmt(Math.abs(cam.dutch))}°` : ''}
+            A-CAM · {cam.f}mm · f/{cam.N} · {fmt(cam.fovH / DEG)}° H · ↕{fmt(cam.height, 2)}m{cam.dutch ? ` · dutch ${fmt(Math.abs(cam.dutch))}°` : ''}
           </text>
         )}
       </g>
@@ -231,6 +238,64 @@ const FlatLay = forwardRef(function FlatLay({ scene, layers }, ref) {
     </svg>
   );
 });
+
+// Move overlay: dolly track with ties, ghost frustums at the start and end marks,
+// pedestal travel, and the 1st AC's focus marks for a rack.
+function MovePath({ move, T, k, tanH, farY, labels }) {
+  const { A, B, type } = move;
+  const a = T(A), b = T(B);
+  const els = [];
+  const ghost = (p, key, label) => {
+    const s = T(p), reach = Math.min(farY - p.y, 6);
+    const l = T({ x: p.x - reach * tanH, y: p.y + reach }), r = T({ x: p.x + reach * tanH, y: p.y + reach });
+    els.push(
+      <g key={key} opacity="0.55">
+        <path d={`M${s.x},${s.y} L${l.x},${l.y} M${s.x},${s.y} L${r.x},${r.y}`} stroke="#f5b041" strokeWidth="1" strokeDasharray="3 4" />
+        <rect x={s.x - 9} y={s.y - 1} width={18} height={13} rx={2} fill="none" stroke="#f5b041" strokeWidth="1.2" />
+      </g>,
+    );
+    if (labels) labels.push({ ax: s.x, ay: s.y, x: s.x - 70, y: s.y + 26, lines: [{ t: label, cls: 'lbl', fill: '#f5b041' }] });
+  };
+  if (['push', 'pull', 'truck'].includes(type)) {
+    const len = Math.hypot(b.x - a.x, b.y - a.y) || 1;
+    const ux = (b.x - a.x) / len, uy = (b.y - a.y) / len, nx = -uy, ny = ux;
+    const g = 7;
+    const ext = 0.6 * k; // track runs a little past both marks
+    const s0 = { x: a.x - ux * ext, y: a.y - uy * ext }, s1 = { x: b.x + ux * ext, y: b.y + uy * ext };
+    [-1, 1].forEach((side) => els.push(
+      <line key={'rail' + side} x1={s0.x + nx * g * side} y1={s0.y + ny * g * side} x2={s1.x + nx * g * side} y2={s1.y + ny * g * side} stroke="#b9a27a" strokeWidth="1.5" />,
+    ));
+    const total = len + 2 * ext, step = Math.max(0.3 * k, 8);
+    for (let d = 0; d <= total; d += step) {
+      const c = { x: s0.x + ux * d, y: s0.y + uy * d };
+      els.push(<line key={'tie' + d} x1={c.x - nx * (g + 3)} y1={c.y - ny * (g + 3)} x2={c.x + nx * (g + 3)} y2={c.y + ny * (g + 3)} stroke="#6f6248" strokeWidth="2" />);
+    }
+    const m = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+    els.push(<path key="arrow" d={`M${m.x - ux * 8 + nx * 6},${m.y - uy * 8 + ny * 6} L${m.x + ux * 6},${m.y + uy * 6} L${m.x - ux * 8 - nx * 6},${m.y - uy * 8 - ny * 6}`} fill="none" stroke="#f5b041" strokeWidth="2" />);
+    ghost(A, 'gA', type === 'pull' ? 'START · hero frame' : 'START');
+    ghost(B, 'gB', type === 'pull' ? 'END' : 'END · hero frame');
+    if (labels) labels.push({ ax: m.x, ay: m.y, x: m.x + 16, y: m.y - 10, lines: [{ t: `${move.label.toUpperCase()} · ${fmt(move.travel, 2)} m · ${fmt(move.duration, 0)} s`, cls: 'lbl', fill: '#f5b041' }, { t: `peak ${fmt(move.speedPeak, 2)} m/s · eased`, cls: 'lbl lbl-dim' }] });
+  } else if (type === 'pedestal') {
+    const up = B.h > A.h;
+    els.push(
+      <g key="ped" transform={`translate(${a.x - 34},${a.y})`}>
+        <line x1={0} y1={-16} x2={0} y2={16} stroke="#f5b041" strokeWidth="2" />
+        <path d={up ? 'M-5,-10 L0,-17 L5,-10' : 'M-5,10 L0,17 L5,10'} fill="none" stroke="#f5b041" strokeWidth="2" />
+      </g>,
+    );
+    if (labels) labels.push({ ax: a.x - 34, ay: a.y, x: a.x - 200, y: a.y - 4, lines: [{ t: `PEDESTAL ${up ? 'UP' : 'DOWN'} · ${fmt(A.h, 2)} → ${fmt(B.h, 2)} m`, cls: 'lbl', fill: '#f5b041' }, { t: `${fmt(move.lift, 2)} m in ${fmt(move.duration, 0)} s`, cls: 'lbl lbl-dim' }] });
+  } else if (type === 'rack') {
+    [['a', move.rack.a], ['b', move.rack.b]].forEach(([id, m], i) => {
+      const y = B.y + m.dist;
+      const half = (m.dist) * tanH;
+      const l = T({ x: B.x - half, y }), r = T({ x: B.x + half, y });
+      els.push(<line key={'mk' + id} x1={l.x} y1={l.y} x2={r.x} y2={r.y} stroke="#f5b041" strokeWidth="1.2" strokeDasharray="1 3" />);
+      els.push(<circle key={'mc' + id} cx={r.x} cy={r.y} r={3.5} fill="#f5b041" />);
+      if (labels) labels.push({ ax: r.x, ay: r.y, x: r.x + 6, y: r.y + 4, lines: [{ t: `MARK ${i + 1} · ${m.label} · ${fmt(m.dist, 2)} m`, cls: 'lbl', fill: '#f5b041' }] });
+    });
+  }
+  return <g>{els}</g>;
+}
 
 function SetGeometry({ scene, T, k }) {
   const { set } = scene;

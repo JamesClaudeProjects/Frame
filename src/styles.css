@@ -130,3 +130,18 @@ input[type='range'] { width: 100%; accent-color: var(--accent); }
   .grid { grid-template-columns: 1fr; grid-template-areas: 'canvas' 'ctl' 'side' 'theory'; padding: 8px; }
   .controls { position: static; max-height: none; }
 }
+
+/* --- camera move --- */
+.transport { display: flex; align-items: center; gap: 6px; margin-top: 8px; }
+.transport button {
+  background: var(--panel-2); border: 1px solid var(--line); border-radius: 3px; width: 30px; height: 26px;
+  cursor: pointer; font-size: 11px; color: #c3c9d4; padding: 0;
+}
+.transport button.play { background: #2a2214; border-color: var(--accent); color: var(--accent); width: 36px; }
+.transport input { flex: 1; min-width: 0; }
+.transport .tc { font-family: var(--mono); font-size: 10.5px; color: var(--dim); white-space: nowrap; min-width: 78px; text-align: right; }
+.move-box { margin: 10px 0; padding: 10px; border: 1px solid #3a2f1a; background: #15130f; border-radius: 4px; }
+.move-head { display: flex; justify-content: space-between; align-items: baseline; font-family: var(--mono); font-size: 11px; margin-bottom: 6px; }
+.move-head b { color: var(--accent); letter-spacing: 0.08em; text-transform: uppercase; font-weight: 500; }
+.move-box .stats td, .move-box .stats th { padding: 3px 6px 3px 0; }
+.move-gear { font-family: var(--mono); font-size: 10.5px; color: #c9a75b; margin-top: 6px; }

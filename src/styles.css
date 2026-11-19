@@ -145,3 +145,5 @@ input[type='range'] { width: 100%; accent-color: var(--accent); }
 .move-head b { color: var(--accent); letter-spacing: 0.08em; text-transform: uppercase; font-weight: 500; }
 .move-box .stats td, .move-box .stats th { padding: 3px 6px 3px 0; }
 .move-gear { font-family: var(--mono); font-size: 10.5px; color: #c9a75b; margin-top: 6px; }
+.move-warn { font-family: var(--mono); font-size: 10.5px; color: #ff7a7e; margin-top: 5px; line-height: 1.4; }
+.vf .vf-warn { font-family: var(--mono); font-size: 10px; font-weight: 600; fill: #ff5a5f; paint-order: stroke; stroke: #000; stroke-width: 3px; }

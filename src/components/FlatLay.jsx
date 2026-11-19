@@ -18,7 +18,7 @@ function useFrame(scene) {
   const sunL = scene.lights.find((l) => l.modifier === 'sun');
   if (sunL) pts.push(sunL.pos);
   // the whole move must fit, so the plot doesn't re-scale during playback
-  if (scene.move) [scene.move.A, scene.move.B].forEach((p) => pts.push({ x: p.x, y: p.y - 0.8 }));
+  if (scene.move) scene.move.path.forEach((p) => pts.push({ x: p.x, y: p.y - 0.8 }, { x: p.x, y: p.y + 0.6 }));
   let x0 = Math.min(...pts.map((p) => p.x)), x1 = Math.max(...pts.map((p) => p.x));
   let y0 = Math.min(...pts.map((p) => p.y)), y1 = Math.max(...pts.map((p) => p.y));
   const pad = Math.max(1.1, (y1 - y0) * 0.08);
@@ -32,7 +32,7 @@ function useFrame(scene) {
 
 const halo = { paintOrder: 'stroke', stroke: '#0a0b0e', strokeWidth: 3.5, strokeLinejoin: 'round' };
 
-const FlatLay = forwardRef(function FlatLay({ scene, layers, cam: camPose }, ref) {
+const FlatLay = forwardRef(function FlatLay({ scene, layers, cam: camPose, t = 1 }, ref) {
   const { k, T, inv } = useFrame(scene);
   const cam = camPose ?? scene.camera;
   const cp = cam.pos;
@@ -40,10 +40,15 @@ const FlatLay = forwardRef(function FlatLay({ scene, layers, cam: camPose }, ref
   const tanH = Math.tan(cam.fovH / 2);
   const farTop = inv(0, -20).y; // world y at top of canvas
   const farY = Math.max(farTop, scene.P.y + 2) * 1.05;
-  const coneLen = farY - cp.y;
-  const L = T({ x: cp.x - coneLen * tanH, y: farY }), R = T({ x: cp.x + coneLen * tanH, y: farY });
+  // lens-local frame: lx to camera-right, ly along the lens axis (yaw rotates it)
+  const yaw = cam.yaw || 0;
+  const fw = { x: Math.sin(yaw), y: Math.cos(yaw) }, rt = { x: Math.cos(yaw), y: -Math.sin(yaw) };
+  const Lw = (lx, ly) => ({ x: cp.x + rt.x * lx + fw.x * ly, y: cp.y + rt.y * lx + fw.y * ly });
+  const coneLen = (farY - cp.y) / Math.max(Math.cos(yaw), 0.35);
+  const L = T(Lw(-coneLen * tanH, coneLen)), R = T(Lw(coneLen * tanH, coneLen));
   const conePath = `M${camS.x},${camS.y} L${L.x},${L.y} L${R.x},${R.y} Z`;
   const icon = clamp(k * 0.32, 9, 17);
+  const conflictsNow = new Set(scene.move ? scene.move.conflictsAt(t).map((c) => c.id) : []);
   const gridStep = [0.5, 1, 2, 5, 10].find((s) => s * k >= 30) ?? 10;
   const inv0 = inv(0, 0), inv1 = inv(W, H);
   const dof = depthOfField(cam.f, cam.N, cam.focus ?? scene.P.y);
@@ -68,7 +73,7 @@ const FlatLay = forwardRef(function FlatLay({ scene, layers, cam: camPose }, ref
   const isPrincipal = (sh) => principals.some((p) => p.x === sh.from.x && p.y === sh.from.y);
   const obstacles = scene.subjects.map((s) => { const c = T(s); const r = Math.max(0.3 * k, 12); return { x0: c.x - r, y0: c.y - r, x1: c.x + r, y1: c.y + r }; });
   obstacles.push({ x0: camS.x - 18, y0: camS.y - 16, x1: camS.x + 300, y1: camS.y + 22 });
-  const ray = (a, l) => T({ x: cp.x + Math.sin(a) * l, y: cp.y + Math.cos(a) * l });
+  const ray = (a, l) => T(Lw(Math.sin(a) * l, Math.cos(a) * l));
 
   return (
     <svg ref={ref} viewBox={`0 0 ${W} ${H}`} className="flatlay" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Top-down lighting plot">
@@ -118,37 +123,44 @@ const FlatLay = forwardRef(function FlatLay({ scene, layers, cam: camPose }, ref
           {layers.guides && (
             <g className="guide">
               {[-thirdAng, thirdAng].map((a, i) => { const e = ray(a, coneLen); return <line key={i} x1={camS.x} y1={camS.y} x2={e.x} y2={e.y} />; })}
-              <line x1={camS.x} y1={camS.y} x2={camS.x} y2={T({ x: cp.x, y: farY }).y} strokeDasharray="2 6" />
+              {(() => { const e = T(Lw(0, coneLen)); return <line x1={camS.x} y1={camS.y} x2={e.x} y2={e.y} strokeDasharray="2 6" />; })()}
             </g>
           )}
         </g>
       )}
 
-      {/* Depth of field */}
+      {/* Depth of field — bands perpendicular to the lens axis, clipped to the frustum */}
       {layers.dof && (
         <g clipPath="url(#cone)">
           {(() => {
-            const nearS = yToS(cp.y + dof.near), farS = Number.isFinite(dof.far) ? yToS(cp.y + Math.min(dof.far, coneLen)) : -50;
-            const fall = Math.max((nearS - farS) * 0.8, 14);
+            const wide = coneLen * tanH * 1.6;
+            const band = (n, f, props) => {
+              const q = [Lw(-wide, n), Lw(wide, n), Lw(wide, f), Lw(-wide, f)].map(T);
+              return <polygon points={q.map((p) => `${p.x},${p.y}`).join(' ')} {...props} />;
+            };
+            const line = (d, props) => { const a = T(Lw(-wide, d)), b = T(Lw(wide, d)); return <line x1={a.x} y1={a.y} x2={b.x} y2={b.y} {...props} />; };
+            const far = Number.isFinite(dof.far) ? Math.min(dof.far, coneLen) : coneLen;
+            const fall = Math.max((far - dof.near) * 0.8, 14 / k);
+            const fd = cam.focus ?? scene.P.y;
             return (
               <>
-                <rect x={0} width={W} y={farS - fall} height={fall} fill="#7fd3ff" opacity="0.05" />
-                <rect x={0} width={W} y={nearS} height={fall} fill="#7fd3ff" opacity="0.05" />
-                <rect x={0} width={W} y={farS} height={Math.max(nearS - farS, 1.5)} fill="#7fd3ff" opacity="0.2" />
-                <line x1={0} x2={W} y1={nearS} y2={nearS} stroke="#7fd3ff" strokeWidth="1" strokeDasharray="5 4" opacity="0.8" />
-                {Number.isFinite(dof.far) && <line x1={0} x2={W} y1={farS} y2={farS} stroke="#7fd3ff" strokeWidth="1" strokeDasharray="5 4" opacity="0.8" />}
-                <line x1={0} x2={W} y1={yToS(focusY)} y2={yToS(focusY)} stroke="#7fd3ff" strokeWidth="1.6" />
+                {band(far, far + fall, { fill: '#7fd3ff', opacity: 0.05 })}
+                {band(Math.max(dof.near - fall, 0), dof.near, { fill: '#7fd3ff', opacity: 0.05 })}
+                {band(dof.near, Math.max(far, dof.near + 1.5 / k), { fill: '#7fd3ff', opacity: 0.2 })}
+                {line(dof.near, { stroke: '#7fd3ff', strokeWidth: 1, strokeDasharray: '5 4', opacity: 0.8 })}
+                {Number.isFinite(dof.far) && line(far, { stroke: '#7fd3ff', strokeWidth: 1, strokeDasharray: '5 4', opacity: 0.8 })}
+                {line(fd, { stroke: '#7fd3ff', strokeWidth: 1.6 })}
               </>
             );
           })()}
         </g>
       )}
       {layers.dof && layers.labels && (() => {
-        const y = yToS(focusY);
-        const xL = T({ x: cp.x - (focusY - cp.y) * tanH, y: focusY }).x;
-        const t = `FOCUS ${fmt(focusY - cp.y, 2)}m · DoF ${dof.total < 1 ? fmt(dof.total * 100, 0) + 'cm' : Number.isFinite(dof.total) ? fmt(dof.total, 2) + 'm' : '→∞'}`;
+        const fd = cam.focus ?? scene.P.y;
+        const anchor = T(Lw(-fd * tanH, fd));
+        const t = `FOCUS ${fmt(fd, 2)}m · DoF ${dof.total < 1 ? fmt(dof.total * 100, 0) + 'cm' : Number.isFinite(dof.total) ? fmt(dof.total, 2) + 'm' : '→∞'}`;
         const w = t.length * 6.3;
-        labels.push({ ax: xL, ay: y, x: Math.max(8, xL - w - 8), y: y + 4, lines: [{ t, cls: 'lbl lbl-dof' }] });
+        labels.push({ ax: anchor.x, ay: anchor.y, x: Math.max(8, anchor.x - w - 8), y: anchor.y + 4, lines: [{ t, cls: 'lbl lbl-dof' }] });
         return null;
       })()}
 
@@ -204,13 +216,26 @@ const FlatLay = forwardRef(function FlatLay({ scene, layers, cam: camPose }, ref
 
       {scene.move && scene.move.type !== 'static' && <MovePath move={scene.move} T={T} k={k} tanH={tanH} farY={farY} labels={layers.labels ? labels : null} />}
 
+      {/* Fixtures in shot over the move (dashed) / right now (solid) */}
+      {scene.move && scene.move.conflicts.map((c) => {
+        const l = scene.lights.find((x) => x.id === c.id);
+        if (!l) return null;
+        const p = T(l.pos), now = conflictsNow.has(c.id);
+        return (
+          <g key={'cf' + c.id}>
+            <circle cx={p.x} cy={p.y} r={icon * 1.7} fill="none" stroke="#ff5a5f" strokeWidth={now ? 2.2 : 1.2} strokeDasharray={now ? 'none' : '4 3'} />
+            {now && <text x={p.x} y={p.y + icon * 1.7 + 12} textAnchor="middle" className="lbl" style={{ ...halo, fill: '#ff5a5f', fontWeight: 600 }}>IN SHOT</text>}
+          </g>
+        );
+      })}
+
       {/* Camera */}
-      <g transform={`translate(${camS.x},${camS.y})`}>
+      <g transform={`translate(${camS.x},${camS.y}) rotate(${(yaw * 180) / Math.PI})`}>
         <rect x={-15} y={-2} width={30} height={22} rx={3} fill="#1b1f27" stroke="#e9eef5" strokeWidth="1.5" />
         <path d="M-9,-2 L-12,-14 L12,-14 L9,-2 Z" fill="#2a303b" stroke="#e9eef5" strokeWidth="1.5" />
         <circle cx={0} cy={9} r={4} fill="#e05757" />
         {layers.labels && (
-          <text x={22} y={10} className="lbl" fill="#e9eef5" style={halo}>
+          <text x={22} y={10} className="lbl" fill="#e9eef5" style={halo} transform={`rotate(${(-yaw * 180) / Math.PI})`}>
             A-CAM · {cam.f}mm · f/{cam.N} · {fmt(cam.fovH / DEG)}° H · ↕{fmt(cam.height, 2)}m{cam.dutch ? ` · dutch ${fmt(Math.abs(cam.dutch))}°` : ''}
           </text>
         )}
@@ -241,40 +266,60 @@ const FlatLay = forwardRef(function FlatLay({ scene, layers, cam: camPose }, ref
 
 // Move overlay: dolly track with ties, ghost frustums at the start and end marks,
 // pedestal travel, and the 1st AC's focus marks for a rack.
+// Move overlay: dolly track (straight or curved) with ties, ghost frustums at the start and
+// end marks, pedestal travel, the zoom's focal-length change and the 1st AC's focus marks.
 function MovePath({ move, T, k, tanH, farY, labels }) {
   const { A, B, type } = move;
-  const a = T(A), b = T(B);
+  const a = T(A);
   const els = [];
-  const ghost = (p, key, label) => {
-    const s = T(p), reach = Math.min(farY - p.y, 6);
-    const l = T({ x: p.x - reach * tanH, y: p.y + reach }), r = T({ x: p.x + reach * tanH, y: p.y + reach });
+  const ghost = (pose, key, label) => {
+    const p = pose.pos, s = T(p);
+    const yaw = pose.yaw || 0, th = Math.tan(pose.fovH / 2);
+    const fw = { x: Math.sin(yaw), y: Math.cos(yaw) }, rt = { x: Math.cos(yaw), y: -Math.sin(yaw) };
+    const reach = Math.min(farY - p.y, 6);
+    const at = (lx, ly) => T({ x: p.x + rt.x * lx + fw.x * ly, y: p.y + rt.y * lx + fw.y * ly });
+    const l = at(-reach * th, reach), r = at(reach * th, reach);
     els.push(
       <g key={key} opacity="0.55">
         <path d={`M${s.x},${s.y} L${l.x},${l.y} M${s.x},${s.y} L${r.x},${r.y}`} stroke="#f5b041" strokeWidth="1" strokeDasharray="3 4" />
-        <rect x={s.x - 9} y={s.y - 1} width={18} height={13} rx={2} fill="none" stroke="#f5b041" strokeWidth="1.2" />
+        <rect x={-9} y={-1} width={18} height={13} rx={2} fill="none" stroke="#f5b041" strokeWidth="1.2" transform={`translate(${s.x},${s.y}) rotate(${(yaw * 180) / Math.PI})`} />
       </g>,
     );
     if (labels) labels.push({ ax: s.x, ay: s.y, x: s.x - 70, y: s.y + 26, lines: [{ t: label, cls: 'lbl', fill: '#f5b041' }] });
   };
-  if (['push', 'pull', 'truck'].includes(type)) {
-    const len = Math.hypot(b.x - a.x, b.y - a.y) || 1;
-    const ux = (b.x - a.x) / len, uy = (b.y - a.y) / len, nx = -uy, ny = ux;
+  const p0 = move.poseAt(0), p1 = move.poseAt(1);
+  if (['push', 'pull', 'truck', 'arc', 'zoom'].includes(type) && move.travel > 0.02) {
+    const pts = move.path.map(T);
     const g = 7;
-    const ext = 0.6 * k; // track runs a little past both marks
-    const s0 = { x: a.x - ux * ext, y: a.y - uy * ext }, s1 = { x: b.x + ux * ext, y: b.y + uy * ext };
-    [-1, 1].forEach((side) => els.push(
-      <line key={'rail' + side} x1={s0.x + nx * g * side} y1={s0.y + ny * g * side} x2={s1.x + nx * g * side} y2={s1.y + ny * g * side} stroke="#b9a27a" strokeWidth="1.5" />,
-    ));
-    const total = len + 2 * ext, step = Math.max(0.3 * k, 8);
-    for (let d = 0; d <= total; d += step) {
-      const c = { x: s0.x + ux * d, y: s0.y + uy * d };
-      els.push(<line key={'tie' + d} x1={c.x - nx * (g + 3)} y1={c.y - ny * (g + 3)} x2={c.x + nx * (g + 3)} y2={c.y + ny * (g + 3)} stroke="#6f6248" strokeWidth="2" />);
+    const rail = (side) => pts.map((p, i) => {
+      const q = pts[Math.min(i + 1, pts.length - 1)], o = pts[Math.max(i - 1, 0)];
+      const dx = q.x - o.x, dy = q.y - o.y, d = Math.hypot(dx, dy) || 1;
+      return `${p.x - (dy / d) * g * side},${p.y + (dx / d) * g * side}`;
+    }).join(' ');
+    els.push(<polyline key="r1" points={rail(1)} fill="none" stroke="#b9a27a" strokeWidth="1.5" />, <polyline key="r2" points={rail(-1)} fill="none" stroke="#b9a27a" strokeWidth="1.5" />);
+    let acc = 0, next = 0;
+    const step = Math.max(0.3 * k, 8);
+    for (let i = 1; i < pts.length; i++) {
+      const p = pts[i - 1], q = pts[i], d = Math.hypot(q.x - p.x, q.y - p.y);
+      while (next <= acc + d && d > 0) {
+        const u = (next - acc) / d, c = { x: p.x + (q.x - p.x) * u, y: p.y + (q.y - p.y) * u };
+        const nx = -(q.y - p.y) / d, ny = (q.x - p.x) / d;
+        els.push(<line key={'tie' + next} x1={c.x - nx * (g + 3)} y1={c.y - ny * (g + 3)} x2={c.x + nx * (g + 3)} y2={c.y + ny * (g + 3)} stroke="#6f6248" strokeWidth="2" />);
+        next += step;
+      }
+      acc += d;
     }
-    const m = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+    const mi = Math.floor(pts.length / 2), m = pts[mi], mn = pts[mi + 1] ?? pts[mi];
+    const dd = Math.hypot(mn.x - m.x, mn.y - m.y) || 1, ux = (mn.x - m.x) / dd, uy = (mn.y - m.y) / dd, nx = -uy, ny = ux;
     els.push(<path key="arrow" d={`M${m.x - ux * 8 + nx * 6},${m.y - uy * 8 + ny * 6} L${m.x + ux * 6},${m.y + uy * 6} L${m.x - ux * 8 - nx * 6},${m.y - uy * 8 - ny * 6}`} fill="none" stroke="#f5b041" strokeWidth="2" />);
-    ghost(A, 'gA', type === 'pull' ? 'START · hero frame' : 'START');
-    ghost(B, 'gB', type === 'pull' ? 'END' : 'END · hero frame');
-    if (labels) labels.push({ ax: m.x, ay: m.y, x: m.x + 16, y: m.y - 10, lines: [{ t: `${move.label.toUpperCase()} · ${fmt(move.travel, 2)} m · ${fmt(move.duration, 0)} s`, cls: 'lbl', fill: '#f5b041' }, { t: `peak ${fmt(move.speedPeak, 2)} m/s · eased`, cls: 'lbl lbl-dim' }] });
+    const startLbl = type === 'pull' ? 'START · hero frame' : 'START';
+    const endLbl = type === 'pull' ? 'END' : 'END · hero frame';
+    ghost(p0, 'gA', type === 'zoom' ? `${startLbl} · ${fmt(p0.f, 0)}mm` : startLbl);
+    ghost(p1, 'gB', type === 'zoom' ? `${endLbl} · ${fmt(p1.f, 0)}mm` : endLbl);
+    if (labels) {
+      const head = type === 'arc' ? `ARC · ${fmt(move.arc.sweep * 180 / Math.PI, 0)}° · r ${fmt(move.arc.radius, 2)} m` : type === 'zoom' ? `DOLLY ZOOM · ${fmt(move.zoom.fStart, 0)}→${fmt(move.zoom.fEnd, 0)}mm` : `${move.label.toUpperCase()} · ${fmt(move.travel, 2)} m`;
+      labels.push({ ax: m.x, ay: m.y, x: m.x + 16, y: m.y - 10, lines: [{ t: `${head} · ${fmt(move.duration, 0)} s`, cls: 'lbl', fill: '#f5b041' }, { t: `${fmt(move.travel, 2)} m track · peak ${fmt(move.speedPeak, 2)} m/s`, cls: 'lbl lbl-dim' }] });
+    }
   } else if (type === 'pedestal') {
     const up = B.h > A.h;
     els.push(
@@ -287,7 +332,7 @@ function MovePath({ move, T, k, tanH, farY, labels }) {
   } else if (type === 'rack') {
     [['a', move.rack.a], ['b', move.rack.b]].forEach(([id, m], i) => {
       const y = B.y + m.dist;
-      const half = (m.dist) * tanH;
+      const half = m.dist * tanH;
       const l = T({ x: B.x - half, y }), r = T({ x: B.x + half, y });
       els.push(<line key={'mk' + id} x1={l.x} y1={l.y} x2={r.x} y2={r.y} stroke="#f5b041" strokeWidth="1.2" strokeDasharray="1 3" />);
       els.push(<circle key={'mc' + id} cx={r.x} cy={r.y} r={3.5} fill="#f5b041" />);

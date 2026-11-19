@@ -1,5 +1,5 @@
 import React from 'react';
-import { project, blurDisc, fmt } from '../engine/engine.js';
+import { project, blurDisc, fixtureHeight, fmt } from '../engine/engine.js';
 
 const SKY = {
   golden: ['#e79a52', '#3a3550'], noon: ['#8fb8de', '#3b6a9a'], blue: ['#2b4682', '#0d1631'],
@@ -8,7 +8,7 @@ const SKY = {
 const GROUND = { grass: '#1e281a', asphalt: '#1d1e22', wet: '#121119', floor: '#2a221d', void: '#060607' };
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 
-export default function Viewfinder({ scene, cam: camPose, metrics, transport }) {
+export default function Viewfinder({ scene, cam: camPose, metrics, transport, t = 1 }) {
   const cam = camPose ?? scene.camera;
   const S = cam.sensor;
   const VW = 560, VH = Math.round(VW / S.ratio);
@@ -21,7 +21,7 @@ export default function Viewfinder({ scene, cam: camPose, metrics, transport }) 
   const bgBlur = blurPx(scene.bgY - cam.pos.y);
 
   // horizon
-  const hz = P({ x: 0, y: 5000 }, cam.height);
+  const hz = P({ x: cam.pos.x + Math.sin(cam.yaw || 0) * 5000, y: cam.pos.y + Math.cos(cam.yaw || 0) * 5000 }, cam.height);
   const horizonY = hz ? hz.y : -1000;
 
   const poly = (pts) => {
@@ -172,6 +172,24 @@ export default function Viewfinder({ scene, cam: camPose, metrics, transport }) 
     );
   });
 
+  // fixtures that intrude on this frame of the move
+  const intruders = (scene.move ? scene.move.conflictsAt(t) : []).filter((c) => c.kind !== 'shadow').map((c) => {
+    const l = scene.lights.find((x) => x.id === c.id);
+    if (!l) return null;
+    const h = l.modifier === 'silk' ? 3.4 : fixtureHeight(l);
+    const head = P(l.pos, h), foot = c.kind === 'stand' || h < 3.2 ? P(l.pos, 0.05) : null;
+    if (!head) return null;
+    const hx = clamp(head.x, 6, VW - 6), hy = clamp(head.y, 6, VH - 6);
+    return (
+      <g key={'in' + c.id}>
+        {foot && <line x1={head.x} y1={head.y} x2={foot.x} y2={foot.y} stroke="#ff5a5f" strokeWidth="1.5" strokeDasharray="4 3" />}
+        <rect x={hx - 7} y={hy - 7} width={14} height={14} fill="none" stroke="#ff5a5f" strokeWidth="2" />
+        <text x={hx > VW / 2 ? hx - 10 : hx + 10} y={clamp(hy + 4, 12, VH - 4)} textAnchor={hx > VW / 2 ? 'end' : 'start'} className="vf-warn">{c.label.toUpperCase()}{c.kind === 'stand' ? ' STAND' : ''} IN SHOT</text>
+      </g>
+    );
+  });
+  const camShadow = scene.move && scene.move.conflictsAt(t).some((c) => c.kind === 'shadow');
+
   const blurLevels = [...new Set(scene.subjects.map((s) => { const h = P(s, 1.62); return h ? Math.round(blurPx(h.z) * 2) : 0; }))];
   const r = metrics ?? scene.readout;
   const sky = SKY[time];
@@ -204,7 +222,9 @@ export default function Viewfinder({ scene, cam: camPose, metrics, transport }) 
             </g>
             {kind !== 'studio' && kind !== 'interior' && <line x1={-VW} x2={VW * 2} y1={horizonY} y2={horizonY} stroke="#ffffff" strokeOpacity="0.25" strokeDasharray="6 6" />}
             {figures}
+            {intruders}
           </g>
+          {camShadow && <text x={VW / 2} y={VH - 10} textAnchor="middle" className="vf-warn">CAMERA SHADOW ON SUBJECT</text>}
           {/* overlays */}
           <g className="vf-thirds">
             {[1, 2].map((i) => <line key={'v' + i} x1={(VW * i) / 3} x2={(VW * i) / 3} y1={0} y2={VH} />)}

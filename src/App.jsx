@@ -116,9 +116,12 @@ export default function App() {
 
           <h2>Camera Move</h2>
           <Seg label="Move" hint="pose over time" value={inp.move} options={MOVES} onChange={set('move')} />
-          {['push', 'pull', 'truck', 'pedestal'].includes(inp.move) && (
+          {['push', 'pull', 'truck', 'pedestal', 'arc', 'zoom'].includes(inp.move) && (
             <div className="ctl">
-              <div className="ctl-label">{inp.move === 'pedestal' ? 'Vertical range' : 'Travel'} <b>{inp.move === 'pedestal' ? `${fmt(move.lift, 2)} m` : `${fmt(move.travel, 2)} m`}</b></div>
+              <div className="ctl-label">
+                {{ pedestal: 'Vertical range', arc: 'Orbit sweep', zoom: 'Zoom ratio' }[inp.move] ?? 'Travel'}{' '}
+                <b>{inp.move === 'pedestal' ? `${fmt(move.lift, 2)} m` : inp.move === 'arc' ? `${fmt((move.arc.sweep * 180) / Math.PI, 0)}° · ${fmt(move.travel, 2)} m` : inp.move === 'zoom' ? `${fmt(move.zoom.fStart, 0)}→${fmt(move.zoom.fEnd, 0)}mm` : `${fmt(move.travel, 2)} m`}</b>
+              </div>
               <input type="range" min={0} max={100} value={Math.round(inp.moveAmt * 100)} onChange={(e) => set('moveAmt')(+e.target.value / 100)} />
             </div>
           )}
@@ -145,7 +148,7 @@ export default function App() {
         </aside>
 
         <section className="panel canvas">
-          <FlatLay ref={svgRef} scene={scene} layers={layers} cam={pose} />
+          <FlatLay ref={svgRef} scene={scene} layers={layers} cam={pose} t={t} />
           {scene.notes.length + move.notes.length > 0 && (
             <div className="notes">{[...scene.notes, ...move.notes].map((n, i) => <span key={i}>⚑ {n}</span>)}</div>
           )}
@@ -153,7 +156,7 @@ export default function App() {
 
         <aside className="panel side">
           <h2>Through the Lens</h2>
-          <Viewfinder scene={scene} cam={pose} metrics={moving ? metrics : null} transport={transport} />
+          <Viewfinder scene={scene} cam={pose} metrics={moving ? metrics : null} transport={transport} t={t} />
           <Readout scene={scene} move={move} metrics={metrics} />
         </aside>
 

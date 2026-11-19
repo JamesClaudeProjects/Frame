@@ -43,6 +43,8 @@ export default function Readout({ scene, move, metrics }) {
               <tr><th></th><th>start</th><th>now</th><th>end</th></tr>
               {[
                 ['Distance', (m) => `${fmt(m.dist, 2)} m`],
+                ...(move.type === 'zoom' ? [['Focal', (m) => `${fmt(m.f, 0)}mm`], ['H FOV', (m) => `${fmt(m.fovH, 0)}°`]] : []),
+                ['Key ↔ lens', (m) => `${fmt(m.keyOff, 0)}°`],
                 ['Lens height', (m) => `${fmt(m.height, 2)} m`],
                 ['Tilt', (m) => `${fmt(m.tiltDeg)}°`],
                 ['Focus', (m) => `${fmt(m.focus, 2)} m`],
@@ -56,6 +58,8 @@ export default function Readout({ scene, move, metrics }) {
             </tbody>
           </table>
           {move.gear.map((g) => <div key={g} className="move-gear">⚙ {g}</div>)}
+          {move.conflicts.map((c) => <div key={c.id} className="move-warn">⚠ {c.note}</div>)}
+          {move.lineCross && <div className="move-warn">⚠ Crosses the 180° line at {fmt(move.lineCross.t * move.duration, 1)} s</div>}
         </div>
       )}
 

@@ -3,7 +3,7 @@
 // Angles are radians in the XY plane (atan2 convention).
 
 import { TIMES, ENVS, TONES, SENSORS, NEON } from './tables.js';
-import { solveMove } from './move.js';
+import { solveMove, fixtureName } from './move.js';
 import { renderKelvin, shiftKelvin, nearestGel, mired, describeShift } from './color.js';
 
 const DEG = Math.PI / 180;
@@ -348,7 +348,7 @@ export function compute(inp) {
   const wantNeg = delta > 0.25 || inp.tone === 'melancholy' || inp.tone === 'tense';
   if (wantNeg) {
     const az = camDir - ls * (82 + J(12)) * DEG;
-    const pos = polar(P, az, 0.85 + J(0.1) + (blocking === 'crowd' ? 0.4 : 0));
+    const pos = placeFixture(az, 0.85 + J(0.1) + (blocking === 'crowd' ? 0.4 : 0), 0, 'Neg fill');
     lights.push({
       id: 'neg', role: 'neg', modifier: 'flag', name: '4×4 Floppy · Duvetyne (negative fill)',
       pos, az, aim: P, dist: len(sub(pos, P)), label: 'NEG FILL', kelvin: null, color: '#0b0b0d', stops: null, size: 1.2,
@@ -449,6 +449,50 @@ export function compute(inp) {
     });
   }
 
+  // --- Camera & optics -------------------------------------------------------
+  const camH = M.camH + J(0.06);
+  const eyeH = 1.6;
+  const vTarget = (M.eyeFrac + J(0.02)) * S.h;
+  const pitch = Math.atan2(eyeH - camH, P.y) - Math.atan(vTarget / f);
+  const dutch = M.dutch ? (M.dutch + J(2)) * (rng() < 0.5 ? 1 : -1) : 0;
+  const camera = { pos: V(0, 0), height: camH, pitch, yaw: 0, dutch, f, N, sensor: S, fovH, fovV, focus: P.y, vTarget, eyeH };
+
+  // --- Clear the hero frame ------------------------------------------------
+  // Every fixture is projected through the solved lens (height, tilt, FOV). Anything whose
+  // head — or stand, unless rigged overhead — lands in frame is raised (overhead rigs) or
+  // cheated wider (stands) until it clears. Shadows are cast after this, from final positions.
+  lights.forEach((l) => {
+    if (['practical'].includes(l.role) || ['sun', 'window'].includes(l.modifier)) return;
+    const silk = l.modifier === 'silk';
+    let h = silk ? 3.4 : fixtureHeight(l);
+    const flown = silk || h > 3.2;
+    const pts = () => (silk ? [[-1.8, -1.8], [1.8, -1.8], [1.8, 1.8], [-1.8, 1.8]].map(([a, b]) => V(l.pos.x + a, l.pos.y + b)) : [l.pos]);
+    const inShot = () => pts().some((p) => (flown ? [h] : [0.05, h * 0.5, h]).some((hh) => {
+      const q = project(camera, p, hh);
+      return q && q.x > -0.03 && q.x < 1.03 && q.y > -0.03 && q.y < 1.03;
+    }));
+    if (!inShot()) { l.headH = h; return; }
+    const h0 = h, p0 = { ...l.pos };
+    const out = Math.sign(l.pos.x) || ls;
+    for (let i = 0; i < 60 && inShot(); i++) {
+      if (flown && h < 7) h += 0.15;
+      else {
+        l.pos = V(l.pos.x + out * 0.15, l.pos.y);
+        if (room && Math.abs(l.pos.x) > room.x1 - 0.2) { l.pos = V(out * (room.x1 - 0.2), l.pos.y); if (h < 7) h += 0.15; }
+      }
+    }
+    l.headH = h;
+    if (Number.isFinite(l.height)) l.height = h;
+    const aim = l.aim ?? P;
+    l.dist = len(sub(l.pos, aim));
+    if (l.modifier !== 'silk') l.az = ang(sub(l.pos, aim));
+    if (l.angSize != null && l.modifier !== 'sun') l.angSize = l.size / Math.max(l.dist, 0.3);
+    const name = fixtureName(l);
+    if (inShot()) notes.push(`${name} cannot fully clear the frame — flag it off or pick it up in a separate setup`);
+    else if (h > h0 + 0.05 && len(sub(l.pos, p0)) < 0.05) notes.push(`${name} raised to ${fmt(h, 1)} m to clear the top of frame`);
+    else notes.push(`${name} cheated ${fmt(len(sub(l.pos, p0)), 1)} m wider${h > h0 + 0.05 ? ` and raised to ${fmt(h, 1)} m` : ''} to clear frame`);
+  });
+
   // --- Shadows ---------------------------------------------------------------
   const shadowOpacity = clamp(0.12 + 0.11 * targetStops, 0.15, 0.62) * (1 - softness * 0.55);
   const shadows = [];
@@ -472,14 +516,6 @@ export function compute(inp) {
     else if (sunL && sun.silked) castFrom({ ...sunL, angSize: 0.0093 }, s, 0.35);
   });
   if (key.modifier === 'silk') subjects.forEach((s) => shadows.push({ from: V(s.x, s.y), dir: keyAz + Math.PI, length: 0.35, penumbra: 0.4, opacity: 0.22, elev: 78, light: 'key' }));
-
-  // --- Camera & optics -------------------------------------------------------
-  const camH = M.camH + J(0.06);
-  const eyeH = 1.6;
-  const vTarget = (M.eyeFrac + J(0.02)) * S.h;
-  const pitch = Math.atan2(eyeH - camH, P.y) - Math.atan(vTarget / f);
-  const dutch = M.dutch ? (M.dutch + J(2)) * (rng() < 0.5 ? 1 : -1) : 0;
-  const camera = { pos: V(0, 0), height: camH, pitch, yaw: 0, dutch, f, N, sensor: S, fovH, fovV, focus: P.y, vTarget, eyeH };
 
   const dof = depthOfField(f, N, P.y);
   const bgBlur = blurDisc(f, N, P.y, bgY);
@@ -548,6 +584,16 @@ export function compute(inp) {
   scene.move = solveMove(scene, inp);
   if (scene.move.theory) theory.push(scene.move.theory);
   return scene;
+}
+
+/** Head height (m) of a fixture, from its role or its solved elevation. */
+export function fixtureHeight(l) {
+  if (Number.isFinite(l.headH)) return l.headH;
+  if (l.role === 'neg') return 2.1;
+  if (l.role === 'fill') return l.modifier === 'bounce' ? 1.4 : 1.8;
+  if (l.role === 'bg') return 2.6;
+  if (Number.isFinite(l.height)) return l.height;
+  return clamp(1.65 + Math.tan(48 * DEG) * Math.max(l.dist ?? 2, 0.5), 2, 6);
 }
 
 function practical(kind, pos, name, k, wb, stops) {

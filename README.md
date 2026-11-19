@@ -33,7 +33,7 @@ npm run dev
 
 **Generate New Variation** reseeds a deterministic PRNG. It changes subject offsets, which third the subject sits on, light angles (±10°), dialogue stagger and crowd positions. The tone's rules stay the same.
 
-## Camera moves (Phase 1)
+## Camera moves
 
 `src/engine/move.js` treats a move as a camera pose over time `t ∈ [0, 1]` with smoothstep easing (peak speed = 1.5× average). Each move is anchored to the solved hero frame: push-in, truck and pedestal **end** on it, and a pull-out **starts** on it.
 
@@ -43,6 +43,12 @@ npm run dev
 | Truck | Lateral position with no pan, producing parallax between subject and background (and an off-frame reveal at high travel) |
 | Pedestal | Lens height; tilt re-solved so a low-to-high move flips the power relationship partway through |
 | Rack Focus | Focus distance between two computed targets (subject ↔ second actor, watching extra, practical or background) |
+| Arc / Orbit | Camera circles the subject at the hero radius and pans with the orbit, so the subject keeps their screen position while the key's angle to the lens changes. The mood decides whether it moves toward the light (opening the face) or away from it (into shadow). Sweep is trimmed to fit the walls |
+| Dolly Zoom | `f(t) = f₀ · D(t)/D₀` keeps the subject the same size while the FOV and background scale change. Dolly-in/zoom-out or the reverse depending on mood, limited to a 14–135 mm lens range and to the set |
 
 The plot draws the dolly track, ghost frustums at both marks, pedestal travel and focus marks. A transport under the viewfinder plays or scrubs the move in real time. The readout compares start, now and end values (distance, height, tilt, focus, DoF, face size, negative space, background scale) and lists the gear needed. Room and alley walls limit travel, and moves that are too fast or too slow are flagged.
+
+### Lights checked against the whole move
+
+After the hero frame is solved, every fixture is projected through the real lens (height, tilt and FOV). Anything whose head or stand would be in shot is raised (overhead rigs) or cheated wider. During a move, every sampled pose is checked again. A fixture or stand that enters frame is flagged with when it happens and a fix (e.g. "boom it to 3.1 m on a C-stand arm"). The engine also flags when the camera rig passes between the key and the subject (camera shadow on the face) and when the camera crosses the 180° line. Conflicts appear as red rings on the plot and as red markers in the viewfinder at the moment they happen.
 

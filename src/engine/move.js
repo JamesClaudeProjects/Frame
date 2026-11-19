@@ -8,6 +8,7 @@
 import { measureFrame, depthOfField, project, fixtureHeight, fmt } from './engine.js';
 
 export const MOVES = {
+  auto: 'Auto (mood)',
   static: 'Static',
   push: 'Push In',
   pull: 'Pull Out',
@@ -16,16 +17,20 @@ export const MOVES = {
   rack: 'Rack Focus',
   arc: 'Arc / Orbit',
   zoom: 'Dolly Zoom',
+  follow: 'Follow',
 };
+
+export const SUPPORTS = { auto: 'Auto', dolly: 'Dolly / Sticks', steadicam: 'Steadicam', handheld: 'Handheld' };
 
 // Tone-driven defaults: shot length (s), pedestal direction (+1 = rises into the hero frame),
 // arc direction (toward or away from the key) and dolly-zoom direction.
 const TONE_MOVE = {
-  melancholy: { dur: 10, ped: 1, arc: 'away', zoom: 'in' },
-  tense: { dur: 8, ped: -1, arc: 'away', zoom: 'in' },
-  romantic: { dur: 7, ped: -1, arc: 'toward', zoom: 'out' },
-  heroic: { dur: 5, ped: -1, arc: 'toward', zoom: 'out' },
-  lonely: { dur: 12, ped: 1, arc: 'toward', zoom: 'in' },
+  // pace: walking speed (m/s) for follow shots
+  melancholy: { dur: 10, ped: 1, arc: 'away', zoom: 'in', pace: 0.8 },
+  tense: { dur: 8, ped: -1, arc: 'away', zoom: 'in', pace: 1.4 },
+  romantic: { dur: 7, ped: -1, arc: 'toward', zoom: 'out', pace: 1.0 },
+  heroic: { dur: 5, ped: -1, arc: 'toward', zoom: 'out', pace: 1.25 },
+  lonely: { dur: 12, ped: 1, arc: 'toward', zoom: 'in', pace: 0.9 },
 };
 
 const DEG = Math.PI / 180;
@@ -42,8 +47,70 @@ const invEase = (e) => {
 };
 const SAMPLES = 48;
 
+function mulberry32(a) {
+  return function () {
+    a |= 0; a = (a + 0x6d2b79f5) | 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+// --- Auto: the mood proposes a move --------------------------------------------
+// Weights are tone tendencies, adjusted by blocking and location; the seed picks among
+// them, so "Generate New Variation" can land on a different (but still in-mood) move.
+const MOOD_WEIGHTS = {
+  melancholy: { pull: 3, pedestal: 2, arc: 1.2, static: 1, follow: 0.8 },
+  tense: { push: 3, zoom: 2, follow: 1.5, rack: 1.2, truck: 0.6 },
+  romantic: { arc: 3, push: 2, rack: 1.8, follow: 0.6 },
+  heroic: { pedestal: 3, push: 2, arc: 1.2, zoom: 0.8, follow: 1 },
+  lonely: { pull: 3, pedestal: 2, truck: 1.2, static: 1, follow: 0.8 },
+};
+
+export function pickMove(scene, inp) {
+  const w = { ...MOOD_WEIGHTS[inp.tone] };
+  const why = [];
+  const bump = (k, x, reason) => { w[k] = (w[k] ?? 0) * x + (w[k] ? 0 : x * 0.6); if (reason) why.push(reason); };
+  if (inp.blocking === 'two') { bump('rack', 1.6, 'a dialogue invites a rack between the pair'); bump('arc', 1.3); w.follow = (w.follow ?? 0) * 0.3; }
+  if (inp.blocking === 'crowd') { bump('follow', 1.8, 'a crowd rewards following the hero through it'); bump('truck', 1.4); }
+  if (['field', 'alley', 'neon'].includes(inp.env)) bump('follow', 1.4, 'an exterior gives room to walk');
+  if (inp.env === 'interior' || inp.env === 'studio') { w.follow = (w.follow ?? 0) * 0.6; }
+  if (inp.focal >= 85) { bump('rack', 1.3, 'a long lens makes focus the main tool'); w.arc = (w.arc ?? 0) * 0.6; }
+  if (inp.focal <= 24) { bump('push', 1.3, 'a wide lens makes travel read strongly'); bump('zoom', 1.2); }
+  const entries = Object.entries(w).filter(([, v]) => v > 0);
+  const total = entries.reduce((a, [, v]) => a + v, 0);
+  const rng = mulberry32(inp.seed * 104729 + 3);
+  let r = rng() * total, type = entries[0][0];
+  for (const [k, v] of entries) { if ((r -= v) <= 0) { type = k; break; } }
+  const ranked = entries.sort((a, b) => b[1] - a[1]).slice(0, 3).map(([k, v]) => `${MOVES[k]} ${Math.round((v / total) * 100)}%`);
+  return { type, odds: ranked, why };
+}
+
+// --- Camera support: operator wobble ---------------------------------------------
+// Deterministic band-limited noise (sum of sines with seeded phases). Handheld adds a
+// breathing component (~0.3 Hz) and a step component (~2 Hz); Steadicam only floats.
+const WOBBLE = {
+  dolly: null,
+  steadicam: { pos: 0.015, h: 0.01, yaw: 0.25, pitch: 0.2, roll: 0.4, hz: [0.22, 0.41] },
+  handheld: { pos: 0.03, h: 0.025, yaw: 0.9, pitch: 0.7, roll: 1.5, hz: [0.3, 0.9, 2.1] },
+};
+function makeWobble(kind, seed) {
+  const W = WOBBLE[kind];
+  if (!W) return () => ({ x: 0, y: 0, h: 0, yaw: 0, pitch: 0, roll: 0 });
+  const rng = mulberry32(seed * 7 + 11);
+  const ph = {};
+  ['x', 'y', 'h', 'yaw', 'pitch', 'roll'].forEach((c) => { ph[c] = W.hz.map(() => rng() * Math.PI * 2); });
+  const n = (c, sec) => W.hz.reduce((a, hz, i) => a + Math.sin(2 * Math.PI * hz * sec + ph[c][i]) / (i + 1), 0) / 1.4;
+  return (sec) => ({
+    x: n('x', sec) * W.pos, y: n('y', sec) * W.pos, h: n('h', sec) * W.h,
+    yaw: n('yaw', sec) * W.yaw * DEG, pitch: n('pitch', sec) * W.pitch * DEG, roll: n('roll', sec) * W.roll,
+  });
+}
+
 export function solveMove(scene, inp) {
-  const type = MOVES[inp.move] ? inp.move : 'static';
+  let type = MOVES[inp.move] ? inp.move : 'static';
+  const auto = type === 'auto' ? pickMove(scene, inp) : null;
+  if (auto) type = auto.type;
   const hero = scene.camera;
   const P = scene.P;
   const S = hero.sensor, f = hero.f, N = hero.N;
@@ -69,7 +136,8 @@ export function solveMove(scene, inp) {
   // rotated from +Y toward +X) and focal length. Default = the hero frame, static.
   const heroRig = { x: 0, y: 0, h: hero.height, yaw: 0, f };
   let rig = () => heroRig;
-  let rack = null, arc = null, zoom = null;
+  let rack = null, arc = null, zoom = null, follow = null;
+  let subjAt = null; // primary subject position over eased time (follow shots)
 
   if (type === 'push' || type === 'pull' || type === 'truck' || type === 'pedestal') {
     const A = { ...heroRig }, B = { ...heroRig };
@@ -142,27 +210,69 @@ export function solveMove(scene, inp) {
       const y = lerp(yS, 0, e);
       return { x: 0, y, h: hero.height, yaw: 0, f: (f * (D - y)) / D };
     };
+  } else if (type === 'follow') {
+    // The subject walks forward along their facing into the hero mark; the camera holds
+    // its hero offset, so framing is locked while the world (and the light) slides past.
+    const s0 = scene.subjects[0];
+    const hd = { x: Math.cos(s0.facing), y: Math.sin(s0.facing) };
+    const off = { x: -P.x, y: -P.y };
+    let walk = tm.pace * duration * (0.25 + 0.75 * amt);
+    const want = walk;
+    const subjPt = (w, e) => ({ x: P.x - hd.x * w * (1 - e), y: P.y - hd.y * w * (1 - e) });
+    const ok = (w) => {
+      for (let i = 0; i <= 20; i++) {
+        const sp = subjPt(w, i / 20);
+        if (!inside({ x: sp.x + off.x, y: sp.y + off.y })) return false;
+        if (Math.abs(sp.x) > xLim || sp.y > maxY || sp.y < minY) return false;
+      }
+      return true;
+    };
+    while (!ok(walk) && walk > 0.3) walk *= 0.9;
+    if (!ok(walk)) walk = 0;
+    if (walk < want - 0.05) notes.push(`Set limits the walk — trimmed from ${fmt(want)} m to ${fmt(walk)} m`);
+    subjAt = (e) => subjPt(walk, e);
+    const towardLens = hd.x * -P.x + hd.y * -P.y > 0; // heading has a component toward the lens
+    follow = { walk, pace: walk / duration, leading: towardLens, heading: s0.facing };
+    rig = (e) => { const sp = subjAt(e); return { x: sp.x + off.x, y: sp.y + off.y, h: hero.height, yaw: 0, f }; };
   }
+
+  // Camera support (wobble) — explicit, or chosen by move and mood.
+  const support = inp.support && inp.support !== 'auto' ? inp.support
+    : type === 'follow' ? 'steadicam' : inp.tone === 'tense' && type !== 'pedestal' ? 'handheld' : 'dolly';
+  const wob = makeWobble(support, inp.seed);
+  const subjPos = (e) => (subjAt ? subjAt(e) : P);
 
   const poseAt = (t) => {
     const e = ease(clamp(t, 0, 1));
     const r = rig(e);
+    const sp = subjPos(e);
     const fwd = { x: Math.sin(r.yaw), y: Math.cos(r.yaw) };
-    const dist = (P.x - r.x) * fwd.x + (P.y - r.y) * fwd.y; // along the lens axis
+    const dist = (sp.x - r.x) * fwd.x + (sp.y - r.y) * fwd.y; // along the lens axis
     // Operator holds the eyes on the tone's target line throughout the move.
     const pitch = Math.atan2(hero.eyeH - r.h, dist) - Math.atan(hero.vTarget / r.f);
     const focus = rack ? lerp(rack.a.dist, rack.b.dist, e) : dist;
+    const w = wob(t * duration);
     return {
-      ...hero, pos: { x: r.x, y: r.y }, height: r.h, yaw: r.yaw, pitch, focus, f: r.f,
+      ...hero, pos: { x: r.x + w.x, y: r.y + w.y }, height: r.h + w.h, yaw: r.yaw + w.yaw, pitch: pitch + w.pitch,
+      dutch: hero.dutch + w.roll, focus, f: r.f, subject: sp,
       fovH: 2 * Math.atan(S.w / (2 * r.f)), fovV: 2 * Math.atan(S.h / (2 * r.f)), dist,
     };
   };
 
-  const keyDir = key.modifier === 'sun' ? key.az : Math.atan2(key.pos.y - P.y, key.pos.x - P.x);
+  // Subjects at time t (only the primary walks).
+  const subjectsAt = (t) => {
+    if (!subjAt) return scene.subjects;
+    const sp = subjAt(ease(clamp(t, 0, 1)));
+    return scene.subjects.map((s, i) => (i === 0 ? { ...s, x: sp.x, y: sp.y } : s));
+  };
+
+  const keyDist = (sp) => (key.modifier === 'sun' ? 1 : Math.hypot(key.pos.x - sp.x, key.pos.y - sp.y, (Number.isFinite(key.height) ? key.height : 2.5) - 1.6));
   const metricsAt = (t) => {
     const cam = poseAt(t);
-    const m = measureFrame(cam, scene.subjects);
-    const camDir = Math.atan2(cam.pos.y - P.y, cam.pos.x - P.x);
+    const sp = cam.subject;
+    const m = measureFrame(cam, subjectsAt(t));
+    const keyDir = key.modifier === 'sun' ? key.az : Math.atan2(key.pos.y - sp.y, key.pos.x - sp.x);
+    const camDir = Math.atan2(cam.pos.y - sp.y, cam.pos.x - sp.x);
     const bgAxis = (scene.bgY - cam.pos.y) / Math.max(Math.cos(cam.yaw), 0.2);
     return {
       ...m,
@@ -175,8 +285,11 @@ export function solveMove(scene, inp) {
       dof: depthOfField(cam.f, N, cam.focus),
       bgScale: cam.dist / bgAxis,
       // face (chin→crown ≈ 0.23 m) as a share of frame height — the usual measure of shot size
-      faceSize: ((0.23 * cam.f) / (Math.hypot(cam.pos.x - P.x, cam.pos.y - P.y) * S.h)) * 100,
+      faceSize: ((0.23 * cam.f) / (Math.hypot(cam.pos.x - sp.x, cam.pos.y - sp.y) * S.h)) * 100,
       keyOff: Math.abs(wrap(keyDir - camDir)) / DEG,
+      // key level on the face relative to the hero mark (inverse-square), in stops
+      keyStops: 2 * Math.log2(keyDist(P) / keyDist(sp)),
+      roll: cam.dutch,
     };
   };
 
@@ -210,15 +323,22 @@ export function solveMove(scene, inp) {
 
   // Practicality / gear.
   const gear = [];
-  if (['push', 'pull', 'truck', 'zoom'].includes(type)) {
+  const tracked = support === 'dolly';
+  if (['push', 'pull', 'truck', 'zoom'].includes(type) && tracked) {
     const track = travel + 1.2;
     gear.push(`Dolly on ≈ ${fmt(track)} m of straight track (${Math.ceil(track / 2.44)} × 8 ft sections)`);
   }
-  if (type === 'arc' && arc.sweep > 0) {
+  if (type === 'follow') {
+    gear.push(`Subject walks ${fmt(follow.walk, 2)} m at ~${fmt(follow.walk / duration * 1.0, 2)} m/s avg (${follow.leading ? 'toward lens — camera leads, backing up' : 'away / across — camera trails'})`);
+    if (support === 'dolly') gear.push(`Dolly on ≈ ${fmt(travel + 1.2)} m of track laid along the walk`);
+  }
+  if (support === 'steadicam') gear.push(`Steadicam${travel > 0.05 ? ` — operator walks ${fmt(travel, 2)} m${type === 'follow' && follow.leading ? ' backwards, with a spotter' : ''}` : ''}; no track`);
+  if (support === 'handheld') gear.push(`Handheld shoulder rig${travel > 0.05 ? ` — operator walks ${fmt(travel, 2)} m` : ''}; ±${WOBBLE.handheld.roll}° roll, ±${WOBBLE.handheld.pos * 100} cm drift`);
+  if (type === 'arc' && arc.sweep > 0 && tracked) {
     const sections = Math.ceil((travel + 1.2) / 2.44);
     gear.push(`Curved track, radius ${fmt(arc.radius, 2)} m, ${fmt(travel, 2)} m of arc (${sections} curved sections${arc.radius < 1.5 ? ' — tight radius, consider a Steadicam or round-table dolly' : ''})`);
   }
-  if (['push', 'pull', 'truck', 'zoom', 'arc'].includes(type)) {
+  if (['push', 'pull', 'truck', 'zoom', 'arc'].includes(type) && tracked) {
     if (speedPeak > 1.2) notes.push(`Peak ${fmt(speedPeak, 2)} m/s is fast for a dolly — lengthen the shot or use a vehicle/remote head`);
     else if (speedPeak < 0.06 && travel > 0.05) notes.push(`Peak ${fmt(speedPeak * 100, 0)} cm/s is a crawl — a motorised slider holds this steadier than a grip`);
   }
@@ -237,10 +357,11 @@ export function solveMove(scene, inp) {
   }
 
   return {
-    type, label: MOVES[type], A, B, path, duration, travel, lift, speedAvg, speedPeak, poseAt, metricsAt,
-    start, end, rack, arc, zoom, lineCross, conflicts, notes, gear,
+    type, label: MOVES[type], auto, support, A, B, path, duration, travel, lift, speedAvg, speedPeak, poseAt, metricsAt, subjectsAt,
+    subjPath: subjAt ? [...Array(25)].map((_, i) => subjAt(i / 24)) : null,
+    start, end, rack, arc, zoom, follow, lineCross, conflicts, notes, gear,
     conflictsAt: (t) => checkLights(scene, poseAt, [t], duration),
-    theory: type === 'static' ? null : synthesizeMove({ type, A, B, start, end, duration, travel, lift, speedPeak, rack, arc, zoom, lineCross, conflicts, scene, inp }),
+    theory: type === 'static' && support === 'dolly' && !auto ? null : synthesizeMove({ type, A, B, start, end, duration, travel, lift, speedPeak, rack, arc, zoom, follow, auto, support, lineCross, conflicts, scene, inp }),
   };
 }
 
@@ -295,6 +416,7 @@ function checkLights(scene, poseAt, onlyTimes, duration) {
   const key = scene.lights.find((l) => l.role === 'key');
   if (key && key.modifier !== 'silk' && key.modifier !== 'window') {
     const shadowTs = poses.filter(({ cam }) => {
+      const P = cam.subject ?? scene.P;
       const c = cam.pos, top = cam.height + 0.35; // camera + operator head
       let kx, ky, kh, kd;
       if (key.modifier === 'sun') {
@@ -346,7 +468,7 @@ function rackTargets(scene, inp) {
   return away ? { a: hero, b: other } : { a: other, b: hero };
 }
 
-function synthesizeMove({ type, A, B, start: s, end: e, duration, travel, lift, speedPeak, rack, arc, zoom, lineCross, conflicts, scene, inp }) {
+function synthesizeMove({ type, A, B, start: s, end: e, duration, travel, lift, speedPeak, rack, arc, zoom, follow, auto, support, lineCross, conflicts, scene, inp }) {
   const f = scene.camera.f;
   const pct = (v) => `${fmt(v, 0)}%`;
   let t = '';
@@ -396,6 +518,21 @@ function synthesizeMove({ type, A, B, start: s, end: e, duration, travel, lift, 
       : 'The background swells forward and crowds the subject while they stay fixed — the world closing in, or the moment becoming enormous.';
     t += ` Depth of field barely changes (${dofText(s.dof)} → ${dofText(e.dof)}) because magnification is constant; the effect is pure perspective.`;
   }
+  else if (type === 'follow') {
+    t = `The subject walks ${fmt(follow.walk, 2)} m into their mark at ~${fmt(follow.pace, 2)} m/s (eased), ${follow.leading ? 'toward the lens, with the camera leading and backing up' : 'away from or across the lens, with the camera trailing'}. `
+      + `The camera holds its offset, so the face stays at ${pct(e.faceSize)} of frame and the composition is locked while the world slides past behind them. `;
+    if (Math.abs(s.keyStops) > 0.3) {
+      t += s.keyStops < 0
+        ? `The key is a fixed fixture, so by inverse-square the face starts ${fmt(-s.keyStops, 1)} stops under and walks up into its full level at the mark — they literally walk into their light.`
+        : `The key is a fixed fixture, so the face starts ${fmt(s.keyStops, 1)} stops hot and settles as they reach the mark — they walk out of the glare into the moment.`;
+    } else t += 'Light level on the face barely changes along the walk, so the move reads purely as motion, not revelation.';
+    t += ` The key's angle to the lens goes ${fmt(s.keyOff, 0)}° → ${fmt(e.keyOff, 0)}° as they move through the set.`;
+  } else if (type === 'static') {
+    t = 'The frame is locked to the hero composition; only the operator moves it.';
+  }
+  if (support === 'steadicam') t += ' On Steadicam the frame floats (±0.4° roll, ~1.5 cm drift at 0.2–0.4 Hz): untethered and gliding, the camera feels like a presence rather than a machine.';
+  if (support === 'handheld') t += ' Handheld adds ±1.5° of roll and ~3 cm of drift with breathing (0.3 Hz) and step (2 Hz) components: the frame is nervous and reactive, making the audience a participant rather than an observer.';
+  if (auto) t = `Auto rolled ${MOVES[type]} from this mood's weighted options (${auto.odds.join(', ')}${auto.why.length ? ` — weighted because ${auto.why.join(', and ')}` : ''}). ` + t;
   if (lineCross) t += ` Note: the move crosses the 180° line at ${fmt(lineCross.t * duration, 1)} s, so the pair swap screen sides — use it deliberately (a shift in power) or keep the track on one side.`;
   if (type !== 'static') {
     const lc = conflicts.filter((c) => c.kind !== 'shadow');

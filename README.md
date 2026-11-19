@@ -45,6 +45,12 @@ npm run dev
 | Rack Focus | Focus distance between two computed targets (subject ↔ second actor, watching extra, practical or background) |
 | Arc / Orbit | Camera circles the subject at the hero radius and pans with the orbit, so the subject keeps their screen position while the key's angle to the lens changes. The mood decides whether it moves toward the light (opening the face) or away from it (into shadow). Sweep is trimmed to fit the walls |
 | Dolly Zoom | `f(t) = f₀ · D(t)/D₀` keeps the subject the same size while the FOV and background scale change. Dolly-in/zoom-out or the reverse depending on mood, limited to a 14–135 mm lens range and to the set |
+| Follow | The subject walks along their facing into the hero mark at a pace set by the mood; the camera keeps its hero offset (leading if they walk toward the lens, trailing otherwise). Lights stay fixed, so the key level on the face changes by inverse-square along the walk |
+| Auto (mood) | The mood weights the moves, adjusted by blocking, location and focal length; the variation seed picks one, and the odds are shown |
+
+**Camera support** (any move, including Static): *Dolly / Sticks* (no wobble), *Steadicam* (slow float, ±0.4° roll) or *Handheld* (breathing and step frequencies, ±1.5° roll, ~3 cm drift). The wobble is seeded noise, so each variation is repeatable. Auto uses Steadicam for follow shots, handheld for Tense, and a dolly otherwise.
+
+**Storyboard:** five panels rendered through the lens at 0, 25, 50, 75 and 100% of the move, each captioned with time, focal length, distance, lens height, face size, key level and any light conflicts. Click a panel to jump to it. Export as a standalone SVG or a 2× PNG.
 
 The plot draws the dolly track, ghost frustums at both marks, pedestal travel and focus marks. A transport under the viewfinder plays or scrubs the move in real time. The readout compares start, now and end values (distance, height, tilt, focus, DoF, face size, negative space, background scale) and lists the gear needed. Room and alley walls limit travel, and moves that are too fast or too slow are flagged.
 

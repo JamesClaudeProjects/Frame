@@ -4,7 +4,8 @@ import { TIMES, ENVS, TONES, BLOCKING, SENSORS, APERTURES } from './engine/table
 import FlatLay from './components/FlatLay.jsx';
 import Viewfinder from './components/Viewfinder.jsx';
 import Readout from './components/Readout.jsx';
-import { MOVES } from './engine/move.js';
+import { MOVES, SUPPORTS } from './engine/move.js';
+import Filmstrip from './components/Filmstrip.jsx';
 
 const FOCAL_MARKS = [14, 18, 24, 35, 50, 85, 135];
 
@@ -27,7 +28,7 @@ export default function App() {
   const [inp, setInp] = useState({
     time: 'golden', env: 'interior', blocking: 'one', tone: 'melancholy',
     focal: 50, aperture: 2, aspect: '2.39:1', seed: 1,
-    move: 'push', moveAmt: 0.6, moveDur: null,
+    move: 'auto', moveAmt: 0.6, moveDur: null, support: 'auto',
   });
   const [layers, setLayers] = useState({ fov: true, dof: true, beams: true, shadows: true, guides: true, labels: true });
   const set = (k) => (v) => setInp((s) => ({ ...s, [k]: v }));
@@ -37,7 +38,7 @@ export default function App() {
   // --- playback: t ∈ [0, 1] across the move's real duration
   const [t, setT] = useState(0);
   const [playing, setPlaying] = useState(false);
-  useEffect(() => { setT(0); setPlaying(false); }, [inp.move]);
+  useEffect(() => { setT(0); setPlaying(false); }, [inp.move, move.type]);
   const tRef = useRef(0);
   tRef.current = t;
   useEffect(() => {
@@ -55,7 +56,9 @@ export default function App() {
   }, [playing, move]);
   const pose = useMemo(() => move.poseAt(t), [move, t]);
   const metrics = useMemo(() => move.metricsAt(t), [move, t]);
-  const moving = move.type !== 'static';
+  const subjectsNow = useMemo(() => move.subjectsAt(t), [move, t]);
+  const moving = move.type !== 'static' || move.support !== 'dolly';
+  const moveName = `${move.auto ? 'Auto → ' : ''}${move.label}${move.support !== 'dolly' ? ` · ${SUPPORTS[move.support]}` : ''}`;
   const play = () => { if (t >= 1) setT(0); setPlaying((p) => !p); };
   const transport = moving && (
     <div className="transport">
@@ -88,7 +91,7 @@ export default function App() {
         </div>
         <div className="top-meta">
           <span>{TIMES[inp.time].label}</span><span>{ENVS[inp.env].label}</span><span>{TONES[inp.tone].label}</span>
-          <span>{inp.focal}mm f/{inp.aperture}</span><span>{inp.aspect}</span>{moving && <span>{move.label}</span>}
+          <span>{inp.focal}mm f/{inp.aperture}</span><span>{inp.aspect}</span>{moving && <span>{moveName}</span>}
         </div>
       </header>
 
@@ -116,11 +119,13 @@ export default function App() {
 
           <h2>Camera Move</h2>
           <Seg label="Move" hint="pose over time" value={inp.move} options={MOVES} onChange={set('move')} />
-          {['push', 'pull', 'truck', 'pedestal', 'arc', 'zoom'].includes(inp.move) && (
+          {move.auto && <div className="auto-pick">→ {move.label} <span className="dim">· {move.auto.odds.join(' · ')}</span></div>}
+          <Seg label="Camera Support" hint="operator wobble" value={inp.support} options={SUPPORTS} onChange={set('support')} />
+          {['push', 'pull', 'truck', 'pedestal', 'arc', 'zoom', 'follow'].includes(move.type) && (
             <div className="ctl">
               <div className="ctl-label">
-                {{ pedestal: 'Vertical range', arc: 'Orbit sweep', zoom: 'Zoom ratio' }[inp.move] ?? 'Travel'}{' '}
-                <b>{inp.move === 'pedestal' ? `${fmt(move.lift, 2)} m` : inp.move === 'arc' ? `${fmt((move.arc.sweep * 180) / Math.PI, 0)}° · ${fmt(move.travel, 2)} m` : inp.move === 'zoom' ? `${fmt(move.zoom.fStart, 0)}→${fmt(move.zoom.fEnd, 0)}mm` : `${fmt(move.travel, 2)} m`}</b>
+                {{ pedestal: 'Vertical range', arc: 'Orbit sweep', zoom: 'Zoom ratio', follow: 'Walk distance' }[move.type] ?? 'Travel'}{' '}
+                <b>{move.type === 'pedestal' ? `${fmt(move.lift, 2)} m` : move.type === 'arc' ? `${fmt((move.arc.sweep * 180) / Math.PI, 0)}° · ${fmt(move.travel, 2)} m` : move.type === 'zoom' ? `${fmt(move.zoom.fStart, 0)}→${fmt(move.zoom.fEnd, 0)}mm` : move.type === 'follow' ? `${fmt(move.follow.walk, 2)} m` : `${fmt(move.travel, 2)} m`}</b>
               </div>
               <input type="range" min={0} max={100} value={Math.round(inp.moveAmt * 100)} onChange={(e) => set('moveAmt')(+e.target.value / 100)} />
             </div>
@@ -148,7 +153,7 @@ export default function App() {
         </aside>
 
         <section className="panel canvas">
-          <FlatLay ref={svgRef} scene={scene} layers={layers} cam={pose} t={t} />
+          <FlatLay ref={svgRef} scene={scene} layers={layers} cam={pose} t={t} subjects={subjectsNow} />
           {scene.notes.length + move.notes.length > 0 && (
             <div className="notes">{[...scene.notes, ...move.notes].map((n, i) => <span key={i}>⚑ {n}</span>)}</div>
           )}
@@ -156,9 +161,15 @@ export default function App() {
 
         <aside className="panel side">
           <h2>Through the Lens</h2>
-          <Viewfinder scene={scene} cam={pose} metrics={moving ? metrics : null} transport={transport} t={t} />
+          <Viewfinder scene={scene} cam={pose} metrics={moving ? metrics : null} transport={transport} t={t} subjects={subjectsNow} />
           <Readout scene={scene} move={move} metrics={metrics} />
         </aside>
+
+        {moving && (
+          <section className="panel board">
+            <Filmstrip scene={scene} t={t} onSeek={(v) => { setPlaying(false); setT(v); }} />
+          </section>
+        )}
 
         <section className="panel theory">
           <h2>Why This Works</h2>

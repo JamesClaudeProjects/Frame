@@ -8,7 +8,9 @@ const SKY = {
 const GROUND = { grass: '#1e281a', asphalt: '#1d1e22', wet: '#121119', floor: '#2a221d', void: '#060607' };
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 
-export default function Viewfinder({ scene, cam: camPose, metrics, transport, t = 1 }) {
+export default function Viewfinder({ scene, cam: camPose, metrics, transport, t = 1, subjects: subjOverride, uid = 'vf', bare = false, width }) {
+  const U = (id) => `${uid}-${id}`;
+  const subjects = subjOverride ?? scene.subjects;
   const cam = camPose ?? scene.camera;
   const S = cam.sensor;
   const VW = 560, VH = Math.round(VW / S.ratio);
@@ -88,7 +90,7 @@ export default function Viewfinder({ scene, cam: camPose, metrics, transport, t 
     const l = P({ x: 80, y: scene.bgY }, 0), r = P({ x: -80, y: scene.bgY }, 0);
     if (l && r) bg.push(<polygon key="trees" points={`${pts.join(' ')} ${l.x},${l.y} ${r.x},${r.y}`} fill="#0f150d" opacity="0.9" />);
   } else if (kind === 'studio') {
-    bg.push(<rect key="cyc" width={VW} height={VH} fill="url(#cycGrad)" />);
+    bg.push(<rect key="cyc" width={VW} height={VH} fill={`url(#${U('cycGrad')})`} />);
   }
 
   // practicals glows
@@ -100,7 +102,7 @@ export default function Viewfinder({ scene, cam: camPose, metrics, transport, t 
     const on = l.lit !== false;
     return (
       <g key={'pr' + i}>
-        {on && <circle cx={p.x} cy={p.y} r={r * (l.modifier === 'neon' ? 5 : 3.2)} fill={l.color} opacity={l.stops < -1.5 ? 0.12 : 0.28} filter="url(#vfGlow)" />}
+        {on && <circle cx={p.x} cy={p.y} r={r * (l.modifier === 'neon' ? 5 : 3.2)} fill={l.color} opacity={l.stops < -1.5 ? 0.12 : 0.28} filter={`url(#${U('vfGlow')})`} />}
         {l.modifier === 'neon'
           ? <rect x={p.x - r * 2.5} y={p.y - r * 0.4} width={r * 5} height={r * 0.8} rx={r * 0.4} fill={on ? l.color : '#333'} />
           : <circle cx={p.x} cy={p.y} r={r * 0.6} fill={on ? l.color : '#333'} />}
@@ -112,7 +114,7 @@ export default function Viewfinder({ scene, cam: camPose, metrics, transport, t 
   const key = scene.lights.find((l) => l.role === 'key');
   const rim = scene.lights.find((l) => l.role === 'rim');
   const ratio = scene.readout.ratio;
-  const sorted = [...scene.subjects].map((s, i) => ({ s, i })).sort((a, b) => b.s.y - a.s.y);
+  const sorted = [...subjects].map((s, i) => ({ s, i })).sort((a, b) => b.s.y - a.s.y);
   const figures = sorted.map(({ s, i }) => {
     const side = { x: Math.cos(s.facing + Math.PI / 2), y: Math.sin(s.facing + Math.PI / 2) };
     const at = (o, h) => P({ x: s.x + side.x * o, y: s.y + side.y * o }, h);
@@ -141,12 +143,12 @@ export default function Viewfinder({ scene, cam: camPose, metrics, transport, t 
     const toCam = Math.atan2(cam.pos.y - s.y, cam.pos.x - s.x), toKey = Math.atan2(kp.y - s.y, kp.x - s.x);
     const off = Math.abs(Math.atan2(Math.sin(toKey - toCam), Math.cos(toKey - toCam))) / Math.PI; // 0 = frontal, 1 = from behind
     const term = clamp(1 - off, 0.05, 0.95);
-    const gid = `hg${i}`;
+    const gid = U(`hg${i}`);
     const blur = blurPx(head.z);
     const shade = clamp(1 / ratio, 0.04, 0.6);
     const kc = keyFor.color;
     return (
-      <g key={'fig' + i} filter={blur > 0.6 ? `url(#b${Math.round(blur * 2)})` : undefined} opacity={s.extra ? 0.75 : 1}>
+      <g key={'fig' + i} filter={blur > 0.6 ? `url(#${U(`b${Math.round(blur * 2)}`)})` : undefined} opacity={s.extra ? 0.75 : 1}>
         <defs>
           <linearGradient id={gid} x1={litRight ? 1 : 0} x2={litRight ? 0 : 1} y1="0" y2="0">
             <stop offset="0" stopColor={kc} stopOpacity="0.95" />
@@ -190,33 +192,32 @@ export default function Viewfinder({ scene, cam: camPose, metrics, transport, t 
   });
   const camShadow = scene.move && scene.move.conflictsAt(t).some((c) => c.kind === 'shadow');
 
-  const blurLevels = [...new Set(scene.subjects.map((s) => { const h = P(s, 1.62); return h ? Math.round(blurPx(h.z) * 2) : 0; }))];
+  const blurLevels = [...new Set(subjects.map((s) => { const h = P(s, 1.62); return h ? Math.round(blurPx(h.z) * 2) : 0; }))];
   const r = metrics ?? scene.readout;
   const sky = SKY[time];
   const groundC = GROUND[scene.set.ground];
 
-  return (
-    <div className="vf-wrap">
-      <svg viewBox={`0 0 ${VW} ${VH}`} className="vf" xmlns="http://www.w3.org/2000/svg">
+  const svgEl = (
+      <svg viewBox={`0 0 ${VW} ${VH}`} className="vf" xmlns="http://www.w3.org/2000/svg" width={width} height={width ? (width * VH) / VW : undefined}>
         <defs>
-          <linearGradient id="skyGrad" x1="0" y1="1" x2="0" y2="0">
+          <linearGradient id={U('skyGrad')} x1="0" y1="1" x2="0" y2="0">
             <stop offset="0" stopColor={sky[0]} /><stop offset="1" stopColor={sky[1]} />
           </linearGradient>
-          <radialGradient id="cycGrad" cx="0.5" cy="0.55" r="0.7"><stop offset="0" stopColor="#141518" /><stop offset="1" stopColor="#050506" /></radialGradient>
-          <filter id="vfGlow" x="-100%" y="-100%" width="300%" height="300%"><feGaussianBlur stdDeviation="6" /></filter>
-          <filter id="bgBlur" x="-10%" y="-10%" width="120%" height="120%"><feGaussianBlur stdDeviation={bgBlur} /></filter>
+          <radialGradient id={U('cycGrad')} cx="0.5" cy="0.55" r="0.7"><stop offset="0" stopColor="#141518" /><stop offset="1" stopColor="#050506" /></radialGradient>
+          <filter id={U('vfGlow')} x="-100%" y="-100%" width="300%" height="300%"><feGaussianBlur stdDeviation="6" /></filter>
+          <filter id={U('bgBlur')} x="-10%" y="-10%" width="120%" height="120%"><feGaussianBlur stdDeviation={bgBlur} /></filter>
           {blurLevels.map((b) => (
-            <filter key={b} id={`b${b}`} x="-50%" y="-50%" width="200%" height="200%"><feGaussianBlur stdDeviation={b / 2} /></filter>
+            <filter key={b} id={U(`b${b}`)} x="-50%" y="-50%" width="200%" height="200%"><feGaussianBlur stdDeviation={b / 2} /></filter>
           ))}
-          <clipPath id="vfClip"><rect width={VW} height={VH} /></clipPath>
+          <clipPath id={U('vfClip')}><rect width={VW} height={VH} /></clipPath>
         </defs>
-        <g clipPath="url(#vfClip)">
+        <g clipPath={`url(#${U('vfClip')})`}>
           <g transform={`rotate(${-cam.dutch} ${VW / 2} ${VH / 2})`}>
             <rect x={-VW} y={-VH} width={VW * 3} height={VH * 3} fill={groundC} />
             {kind !== 'studio' && kind !== 'interior' && (
-              <rect x={-VW} y={-VH * 2} width={VW * 3} height={Math.max(horizonY + VH * 2, 0)} fill="url(#skyGrad)" opacity={time === 'midnight' ? 0.6 : 0.85} />
+              <rect x={-VW} y={-VH * 2} width={VW * 3} height={Math.max(horizonY + VH * 2, 0)} fill={`url(#${U('skyGrad')})`} opacity={time === 'midnight' ? 0.6 : 0.85} />
             )}
-            <g filter={bgBlur > 0.5 ? 'url(#bgBlur)' : undefined}>
+            <g filter={bgBlur > 0.5 ? `url(#${U('bgBlur')})` : undefined}>
               {bg}
               {pracs}
             </g>
@@ -235,6 +236,11 @@ export default function Viewfinder({ scene, cam: camPose, metrics, transport, t 
         </g>
         <rect width={VW} height={VH} fill="none" stroke="#e9eef5" strokeWidth="2" />
       </svg>
+  );
+  if (bare) return svgEl;
+  return (
+    <div className="vf-wrap">
+      {svgEl}
       <div className="vf-hud">
         <span>{cam.f}mm</span><span>f/{cam.N}</span><span>{scene.inp.aspect}</span>
         <span>tilt {r.tiltDeg >= 0 ? '+' : ''}{fmt(r.tiltDeg)}°</span>

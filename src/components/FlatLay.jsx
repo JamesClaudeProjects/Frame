@@ -19,6 +19,7 @@ function useFrame(scene) {
   if (sunL) pts.push(sunL.pos);
   // the whole move must fit, so the plot doesn't re-scale during playback
   if (scene.move) scene.move.path.forEach((p) => pts.push({ x: p.x, y: p.y - 0.8 }, { x: p.x, y: p.y + 0.6 }));
+  if (scene.move && scene.move.subjPath) scene.move.subjPath.forEach((p) => pts.push(p));
   let x0 = Math.min(...pts.map((p) => p.x)), x1 = Math.max(...pts.map((p) => p.x));
   let y0 = Math.min(...pts.map((p) => p.y)), y1 = Math.max(...pts.map((p) => p.y));
   const pad = Math.max(1.1, (y1 - y0) * 0.08);
@@ -32,7 +33,17 @@ function useFrame(scene) {
 
 const halo = { paintOrder: 'stroke', stroke: '#0a0b0e', strokeWidth: 3.5, strokeLinejoin: 'round' };
 
-const FlatLay = forwardRef(function FlatLay({ scene, layers, cam: camPose, t = 1 }, ref) {
+const FlatLay = forwardRef(function FlatLay({ scene, layers, cam: camPose, t = 1, subjects: subjOverride }, ref) {
+  const subjects = subjOverride ?? scene.subjects;
+  const walker = subjects[0], heroPos = scene.subjects[0];
+  const walked = walker.x !== heroPos.x || walker.y !== heroPos.y;
+  // shadows of a walking subject move with them and re-aim away from the key
+  const shadowsNow = !walked ? scene.shadows : scene.shadows.map((sh) => {
+    if (sh.from.x !== heroPos.x || sh.from.y !== heroPos.y) return sh;
+    const src = scene.lights.find((l) => l.id === sh.light);
+    const dir = src && src.modifier !== 'sun' && src.pos ? Math.atan2(walker.y - src.pos.y, walker.x - src.pos.x) : sh.dir;
+    return { ...sh, from: { x: walker.x, y: walker.y }, dir };
+  });
   const { k, T, inv } = useFrame(scene);
   const cam = camPose ?? scene.camera;
   const cp = cam.pos;
@@ -69,9 +80,9 @@ const FlatLay = forwardRef(function FlatLay({ scene, layers, cam: camPose, t = 1
 
   const thirdAng = Math.atan(cam.sensor.w / 6 / cam.f);
   const labels = []; // {ax, ay, x, y, lines:[{t, fill, cls}]}
-  const principals = scene.subjects.filter((p) => !p.extra);
+  const principals = subjects.filter((p) => !p.extra);
   const isPrincipal = (sh) => principals.some((p) => p.x === sh.from.x && p.y === sh.from.y);
-  const obstacles = scene.subjects.map((s) => { const c = T(s); const r = Math.max(0.3 * k, 12); return { x0: c.x - r, y0: c.y - r, x1: c.x + r, y1: c.y + r }; });
+  const obstacles = subjects.map((s) => { const c = T(s); const r = Math.max(0.3 * k, 12); return { x0: c.x - r, y0: c.y - r, x1: c.x + r, y1: c.y + r }; });
   obstacles.push({ x0: camS.x - 18, y0: camS.y - 16, x1: camS.x + 300, y1: camS.y + 22 });
   const ray = (a, l) => T(Lw(Math.sin(a) * l, Math.cos(a) * l));
 
@@ -168,7 +179,7 @@ const FlatLay = forwardRef(function FlatLay({ scene, layers, cam: camPose, t = 1
       {layers.beams && scene.lights.map((l) => <Beam key={'b' + l.id} l={l} T={T} k={k} scene={scene} />)}
 
       {/* Shadows */}
-      {layers.shadows && scene.shadows.map((s, i) => {
+      {layers.shadows && shadowsNow.map((s, i) => {
         const a = s.dir, n = { x: -Math.sin(a), y: Math.cos(a) };
         const b = 0.22, tipW = b + s.penumbra;
         const tip = { x: s.from.x + Math.cos(a) * s.length, y: s.from.y + Math.sin(a) * s.length };
@@ -203,8 +214,21 @@ const FlatLay = forwardRef(function FlatLay({ scene, layers, cam: camPose, t = 1
       })()}
 
       {/* Subjects */}
-      {scene.subjects.map((s, i) => <Subject key={'p' + i} s={s} T={T} k={k} />)}
-      {layers.labels && scene.subjects.forEach((s) => {
+      {scene.move && scene.move.subjPath && (() => {
+        const pts = scene.move.subjPath.map(T);
+        const a = pts[0], b = pts[pts.length - 1];
+        return (
+          <g>
+            <polyline points={pts.map((p) => `${p.x},${p.y}`).join(' ')} fill="none" stroke="#ffd479" strokeWidth="1.5" strokeDasharray="2 5" opacity="0.8" />
+            {pts.filter((_, i) => i % 4 === 2).map((p, i) => <circle key={i} cx={p.x} cy={p.y} r={2.2} fill="#ffd479" opacity="0.7" />)}
+            <circle cx={a.x} cy={a.y} r={5} fill="none" stroke="#ffd479" strokeWidth="1.5" />
+            {layers.labels && void labels.push({ ax: a.x, ay: a.y, x: a.x + 8, y: a.y + 4, lines: [{ t: `WALK ${fmt(scene.move.follow.walk, 2)} m → mark`, cls: 'lbl', fill: '#ffd479' }, { t: `~${fmt(scene.move.follow.pace, 2)} m/s avg`, cls: 'lbl lbl-dim' }] })}
+            <rect x={b.x - 5} y={b.y - 5} width={10} height={10} fill="none" stroke="#ffd479" strokeWidth="1.5" transform={`rotate(45 ${b.x} ${b.y})`} />
+          </g>
+        );
+      })()}
+      {subjects.map((s, i) => <Subject key={'p' + i} s={s} T={T} k={k} />)}
+      {layers.labels && subjects.forEach((s) => {
         if (!s.label) return;
         const c = T(s), sw = Math.max(0.5 * k, 22);
         labels.push({ ax: c.x, ay: c.y, x: c.x + sw * 0.55, y: c.y - sw * 0.45, lines: [{ t: s.label, cls: 'lbl lbl-subj' }] });

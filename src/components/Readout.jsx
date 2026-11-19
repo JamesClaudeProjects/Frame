@@ -35,9 +35,9 @@ export default function Readout({ scene, move, metrics }) {
         <span className="dim">WB {r.wb}K · tone push {r.gelPush.name}</span>
       </div>
 
-      {move && move.type !== 'static' && (
+      {move && (move.type !== 'static' || move.support !== 'dolly') && (
         <div className="move-box">
-          <div className="move-head"><b>{move.label}</b><span className="dim">{fmt(move.duration, 1)} s · peak {fmt(move.speedPeak, 2)} m/s</span></div>
+          <div className="move-head"><b>{move.auto ? 'Auto → ' : ''}{move.label}{move.support !== 'dolly' ? ` · ${move.support}` : ''}</b><span className="dim">{fmt(move.duration, 1)} s · peak {fmt(move.speedPeak, 2)} m/s</span></div>
           <table className="stats">
             <tbody>
               <tr><th></th><th>start</th><th>now</th><th>end</th></tr>
@@ -45,6 +45,7 @@ export default function Readout({ scene, move, metrics }) {
                 ['Distance', (m) => `${fmt(m.dist, 2)} m`],
                 ...(move.type === 'zoom' ? [['Focal', (m) => `${fmt(m.f, 0)}mm`], ['H FOV', (m) => `${fmt(m.fovH, 0)}°`]] : []),
                 ['Key ↔ lens', (m) => `${fmt(m.keyOff, 0)}°`],
+                ...(move.type === 'follow' ? [['Key level', (m) => `${m.keyStops >= 0 ? '+' : ''}${fmt(m.keyStops, 1)} st`]] : []),
                 ['Lens height', (m) => `${fmt(m.height, 2)} m`],
                 ['Tilt', (m) => `${fmt(m.tiltDeg)}°`],
                 ['Focus', (m) => `${fmt(m.focus, 2)} m`],

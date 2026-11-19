@@ -1,6 +1,6 @@
 import React, { forwardRef } from 'react';
 import { fmt, depthOfField } from '../engine/engine.js';
-import { renderKelvin } from '../engine/color.js';
+import { renderKelvin, readable } from '../engine/color.js';
 
 const W = 1000, H = 720;
 const DEG = Math.PI / 180;
@@ -191,10 +191,10 @@ const FlatLay = forwardRef(function FlatLay({ scene, layers, cam: camPose, t = 1
         return (
           <g key={'s' + i}>
             <polygon points={p.map((q) => `${q.x},${q.y}`).join(' ')} fill="#000" opacity={s.opacity} filter={`url(#sblur${i})`} />
-            {isPrincipal(s) && layers.labels && (
+            {isPrincipal(s) && layers.labels && layers.details && (
               <line x1={fs.x} y1={fs.y} x2={ts.x} y2={ts.y} stroke="#8a93a3" strokeDasharray="2 3" strokeWidth="1" opacity="0.7" />
             )}
-            {isPrincipal(s) && layers.labels && void labels.push({ ax: ts.x, ay: ts.y, x: ts.x + 4, y: ts.y + 12, lines: [{ t: `shadow ${fmt(s.length)}m · edge ${fmt(s.penumbra * 100, 0)}cm`, cls: 'lbl lbl-dim' }] })}
+            {isPrincipal(s) && layers.labels && layers.details && void labels.push({ ax: ts.x, ay: ts.y, x: ts.x + 4, y: ts.y + 12, lines: [{ t: `shadow ${fmt(s.length)}m · edge ${fmt(s.penumbra * 100, 0)}cm`, cls: 'lbl lbl-dim' }] })}
           </g>
         );
       })}
@@ -260,12 +260,12 @@ const FlatLay = forwardRef(function FlatLay({ scene, layers, cam: camPose, t = 1
         <circle cx={0} cy={9} r={4} fill="#e05757" />
         {layers.labels && (
           <text x={22} y={10} className="lbl" fill="#e9eef5" style={halo} transform={`rotate(${(-yaw * 180) / Math.PI})`}>
-            A-CAM · {cam.f}mm · f/{cam.N} · {fmt(cam.fovH / DEG)}° H · ↕{fmt(cam.height, 2)}m{cam.dutch ? ` · dutch ${fmt(Math.abs(cam.dutch))}°` : ''}
+            A-CAM · {fmt(cam.f, 0)}mm{layers.details ? ` · f/${cam.N} · ${fmt(cam.fovH / DEG)}° H · ↕${fmt(cam.height, 2)}m${cam.dutch ? ` · dutch ${fmt(Math.abs(cam.dutch))}°` : ''}` : ''}
           </text>
         )}
       </g>
 
-      {layers.labels && <Labels items={labels} obstacles={obstacles} />}
+      {layers.labels && <Labels items={labels} obstacles={obstacles} details={layers.details} />}
 
       {/* Title block & scale */}
       <g transform="translate(16,18)">
@@ -282,7 +282,7 @@ const FlatLay = forwardRef(function FlatLay({ scene, layers, cam: camPose, t = 1
         <rect width={180} height={8} rx={2} fill="url(#kbar)" />
         <text y={22} className="lbl lbl-dim">2000K</text>
         <text x={180} y={22} textAnchor="end" className="lbl lbl-dim">10000K</text>
-        <text x={90} y={22} textAnchor="middle" className="lbl lbl-dim">as rendered @ {wb}K</text>
+        <text x={0} y={-6} className="lbl lbl-dim">Kelvin as rendered @ {wb}K WB</text>
       </g>
     </svg>
   );
@@ -583,7 +583,21 @@ function Fixture({ l, T, k, icon }) {
       g = <circle r={u * 0.5} fill={l.color} />;
   }
   const rotate = ['neon', 'lamp', 'streetlamp', 'sun', 'silk'].includes(l.modifier) ? 0 : a;
-  return <g transform={`translate(${c.x},${c.y}) rotate(${rotate})`}>{g}</g>;
+  const spec = [
+    l.name,
+    l.kelvin ? `${l.kelvin}K` : l.gel ? `gel ${l.gel}` : null,
+    l.role !== 'practical' && l.modifier !== 'sun' && l.dist ? `${fmt(l.dist)} m from subject` : null,
+    l.stops != null && l.role !== 'key' && l.role !== 'practical' ? `${l.stops >= 0 ? '+' : ''}${fmt(l.stops)} stops vs key` : null,
+    l.modifier === 'sun' && l.elev != null ? `${fmt(l.elev, 0)}° above horizon` : null,
+    l.motivation ? `motivated by ${l.motivation}` : null,
+  ].filter(Boolean).join(' · ');
+  return (
+    <g transform={`translate(${c.x},${c.y}) rotate(${rotate})`} className="fx">
+      <title>{spec}</title>
+      <circle r={u * 1.4} fill="transparent" />
+      {g}
+    </g>
+  );
 }
 
 function fixtureLabel(l, T, k, u) {
@@ -601,12 +615,14 @@ function fixtureLabel(l, T, k, u) {
 }
 
 // Greedy label placement: try nearby slots, avoid prior labels/obstacles, draw a leader if displaced.
-function Labels({ items, obstacles }) {
+function Labels({ items: raw, obstacles, details }) {
+  // Without "details", each label keeps only its first line (the hover title has the rest).
+  const items = details ? raw : raw.map((it) => ({ ...it, lines: it.lines.slice(0, 1) }));
   const placed = [...obstacles];
   const hit = (b) => placed.some((o) => b.x0 < o.x1 && b.x1 > o.x0 && b.y0 < o.y1 && b.y1 > o.y0);
   const out = items.map((it, i) => {
-    const w = Math.max(...it.lines.map((l) => l.t.length)) * 6.2 + 4;
-    const h = it.lines.length * 12 + 2;
+    const w = Math.max(...it.lines.map((l) => l.t.length)) * 6.9 + 4;
+    const h = it.lines.length * 13 + 2;
     const flipX = it.ax - (it.x - it.ax) - w;
     let best = null;
     for (const dy of [0, 15, -15, 30, -30, 45, -45, 60, -60, 80, -80, 100, -100]) {
@@ -625,7 +641,7 @@ function Labels({ items, obstacles }) {
       <g key={'lb' + i}>
         {moved && <line x1={it.ax} y1={it.ay} x2={lx} y2={ly} stroke="#6d7584" strokeWidth="0.8" opacity="0.8" />}
         {it.lines.map((l, j) => (
-          <text key={j} x={best.x} y={best.y + j * 12} className={l.cls} style={l.fill ? { ...halo, fill: l.fill } : halo}>{l.t}</text>
+          <text key={j} x={best.x} y={best.y + j * 13} className={l.cls} style={l.fill ? { ...halo, fill: readable(l.fill) } : halo}>{l.t}</text>
         ))}
       </g>
     );

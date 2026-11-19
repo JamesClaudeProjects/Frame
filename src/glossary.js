@@ -1,0 +1,59 @@
+// Plain-language explanations shown in hover tags. Each entry says what the thing is and
+// why it matters on set; the UI can append a line computed from the current scene.
+
+export const GLOSSARY = {
+  // --- Scene inputs
+  time: { title: 'Time of day', body: 'Sets the sun’s height, the sky’s colour temperature and how hard the daylight is. It decides what the key light can be motivated by.' },
+  env: { title: 'Environment', body: 'Sets how much light the surroundings bounce back (the natural fill), where walls are, and which practical lights exist in shot.' },
+  blocking: { title: 'Blocking', body: 'Where people stand and where they look. Controls subject placement on the thirds, eyelines and, for two people, the 180° line.' },
+  tone: { title: 'Emotional tone', body: 'Drives the contrast ratio, camera height and tilt, how much empty space surrounds the subject, gel colour bias and which camera moves are favoured.' },
+  focal: { title: 'Focal length', body: 'Longer lenses see a narrower view and sit further back for the same shot size, which compresses the background. Wider lenses sit closer and exaggerate depth.' },
+  aperture: { title: 'Aperture (f-stop)', body: 'Lower numbers (f/1.4) give a thin slice of focus and need less light; higher numbers (f/11) keep more in focus and need much more light.' },
+  aspect: { title: 'Aspect ratio', body: 'Frame shape. 2.39:1 uses a 2× anamorphic squeeze, so the same focal length sees a much wider horizontal view than 16:9.' },
+  variation: { title: 'Variation', body: 'Re-rolls subject offsets, light angles, crowd positions and (on Auto) the camera move, while keeping the mood’s rules. The same number always gives the same result.' },
+
+  // --- Lighting
+  ratio: { title: 'Key : Fill ratio', body: 'How much brighter the lit side of the face is than the shadow side. 2:1 is soft and open; 4:1 is sculpted; 8:1 and above is chiaroscuro, where the shadow side falls toward black.' },
+  natural: { title: 'Natural ratio', body: 'The contrast this location gives you on its own, from bounce surfaces, ambient sky and the size of the key. The gap to the target decides whether you add fill or take light away.' },
+  key: { title: 'Key light', body: 'The main light that shapes the face. Its Kelvin value is its colour; “soft” or “hard” comes from how large it looks from the subject.' },
+  fill: { title: 'Fill', body: 'Light (or its removal) on the shadow side. “Negative” means a black flag absorbs bounce to deepen shadows instead of adding light.' },
+  rim: { title: 'Rim / backlight', body: 'Light from behind that outlines the head and shoulders, separating the subject from the background.' },
+  practical: { title: 'Practicals', body: 'Lights visible in the shot (lamps, streetlights, neon). They motivate the direction and colour of the lighting.' },
+  wb: { title: 'White balance', body: 'The colour temperature the camera treats as neutral. Sources below it look warm (amber); sources above it look cool (blue).' },
+  gelPush: { title: 'Tone push', body: 'A correction gel on the artificial lights that biases the palette warmer (CTO) or cooler (CTB) to suit the mood.' },
+  keyAngle: { title: 'Key angle', body: 'Azimuth: how far around the subject the key sits from the lens axis. Elevation: how high it is. Around 45° / 30–45° is classic; 90° is side light; beyond that is edge light.' },
+  srcSize: { title: 'Source size', body: 'How large the key looks from the subject’s face. Bigger sources wrap around and give soft shadow edges; small ones give crisp, hard shadows.' },
+  keyLevel: { title: 'Key level', body: 'How much light the key must put on the face for correct exposure at this aperture (ISO 800, 1/48 s shutter).' },
+  fillLevel: { title: 'Fill level', body: 'Light reaching the shadow side at the chosen ratio.' },
+  rimLevel: { title: 'Rim level', body: 'Light from the rim on the subject’s edge. Above the key level the edge glows; below it, it just separates.' },
+  nd: { title: 'ND filtration', body: 'Neutral density filters cut light without changing colour, so you can keep a wide aperture in bright daylight. ND 0.3 = 1 stop.' },
+  unit: { title: 'Key unit', body: 'A rough size of fixture that can deliver the key level at its distance through its modifier.' },
+  distortion: { title: 'Wide-lens distortion', body: 'With the lens close to a face, the nose renders noticeably larger than the ears. Unflattering, but useful for unease.' },
+  shadow: { title: 'Shadow', body: 'Length comes from how high the light is; the soft edge (penumbra) grows with the source’s apparent size.' },
+
+  // --- Lens & frame
+  fov: { title: 'Field of view', body: 'How wide the lens sees, horizontally × vertically: 2·atan(sensor width ÷ 2·focal length).' },
+  ffEq: { title: 'Full-frame equivalent', body: 'The 35 mm stills focal length with the same horizontal view, for comparison.' },
+  dist: { title: 'Subject distance', body: 'Camera to subject along the lens axis. It is solved so the mood’s shot size fits the frame at this focal length.' },
+  dof: { title: 'Depth of field', body: 'The depth zone that looks acceptably sharp. Thin isolates the subject; deep keeps the world readable.' },
+  nearFar: { title: 'Near / far limits', body: 'Where acceptable focus starts and ends. Focusing at the hyperfocal distance keeps everything from half that distance to infinity sharp.' },
+  bgBlur: { title: 'Background blur', body: 'How large an out-of-focus point in the background renders, as a share of frame height. Above about 3% the background dissolves into shapes.' },
+  bgScale: { title: 'Background scale', body: 'How big background objects look relative to the subject’s plane. Low means deep, stretched perspective; high means a compressed, stacked look.' },
+  camera: { title: 'Camera height & tilt', body: 'Below eye level looking up grants stature; above looking down diminishes. Tilt is re-solved so the eyes land on the mood’s target line.' },
+  tilt: { title: 'Tilt', body: 'Camera angle up (+) or down (−) from level.' },
+  dutch: { title: 'Dutch angle', body: 'Rotation of the horizon. A few degrees make a frame feel unstable or wrong.' },
+  negSpace: { title: 'Negative space', body: 'Share of the frame not occupied by people. High values isolate; low values crowd.' },
+  headroom: { title: 'Headroom', body: 'Space between the top of the head and the top of frame, as a share of frame height.' },
+  faceSize: { title: 'Face size', body: 'Face height as a share of frame height — the usual measure of shot size (close-up ≈ 30%+, medium ≈ 15%, wide < 8%).' },
+
+  // --- Moves
+  move: { title: 'Camera move', body: 'How the camera travels during the shot. Auto lets the mood pick; each move ends (or starts) on the composed hero frame.' },
+  support: { title: 'Camera support', body: 'What holds the camera. Dolly is smooth; Steadicam floats; handheld adds breathing and footsteps. Auto chooses from the move and mood.' },
+  travel: { title: 'Move size', body: 'How far the move goes. It is trimmed automatically when walls or the lens range would not allow it.' },
+  shotLength: { title: 'Shot length', body: 'How long the move takes in real time. Speed and the per-frame checks are based on it.' },
+  keyOff: { title: 'Key ↔ lens angle', body: 'Angle between key and camera, seen from the subject. Small means frontal, broad light; near 90° or more means side or edge light.' },
+  keyStops: { title: 'Key level change', body: 'Light on the face compared with the final mark, from inverse-square falloff as the subject walks. Negative = darker.' },
+  inShot: { title: 'Light in shot', body: 'A fixture or its stand enters the frame at this point of the move. The note gives a fix such as booming it higher or flying it.' },
+  speed: { title: 'Peak speed', body: 'Moves ease in and out, so the fastest moment is about 1.5× the average. Above ~1.2 m/s is hard for a dolly grip.' },
+  storyboard: { title: 'Storyboard', body: 'Five real views through the lens across the move. Click a frame to jump there.' },
+};

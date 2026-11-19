@@ -86,7 +86,6 @@ export default function Filmstrip({ scene, t, onSeek }) {
   return (
     <div className="filmstrip">
       <div className="fs-head">
-        <h2>Storyboard</h2>
         <span className="dim">{title}</span>
         <span className="fs-actions">
           <button type="button" onClick={exportSVG}>⤓ SVG</button>

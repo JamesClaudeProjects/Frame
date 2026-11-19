@@ -15,6 +15,13 @@ npm run dev
 2. Go to **Settings → Pages → Source** and pick **GitHub Actions**.
 3. `.github/workflows/deploy.yml` builds and publishes on every push. `vite.config.js` uses `base: './'`, so the app works at any `/<repo>/` path.
 
+## Using the interface
+
+- **Sections collapse.** Every panel group (Scene, Lens, Camera Move, the readouts, Storyboard, Why This Works) folds up. When closed, it shows a one-line summary. Open/closed state is remembered in your browser.
+- **Hover tags.** Anything with a dotted underline explains itself on hover, keyboard focus or tap, often with a line computed from the current scene. The text lives in `src/glossary.js`.
+- **Less on the plot by default.** Fixture labels show one line. Turn on the **details** layer for second lines, shadow sizes and the full camera tag, or hover a fixture for its full spec.
+- **Readable colour.** Kelvin-coloured text is lightened, keeping its hue, until it reaches at least 6:1 contrast against the plot.
+
 ## What the engine computes (`src/engine/engine.js`)
 
 | Output | Model |

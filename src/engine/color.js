@@ -77,3 +77,27 @@ export function describeShift(k, wb) {
 }
 
 export { toHex };
+
+// --- Text legibility ---------------------------------------------------------------
+const relLum = (rgb) => {
+  const c = rgb.map((v) => v / 255).map((v) => (v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4));
+  return 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2];
+};
+export const contrast = (a, b) => {
+  const [x, y] = [relLum(hexToRgb(a)), relLum(hexToRgb(b))].sort((p, q) => q - p);
+  return (x + 0.05) / (y + 0.05);
+};
+/**
+ * Keep a colour's hue but lighten it toward white until it reaches `min` contrast against
+ * `bg` — used for Kelvin-coloured text so a deep-blue 12000K label stays legible.
+ */
+export function readable(hex, bg = '#0d0f13', min = 6) {
+  if (!hex || !/^#[0-9a-f]{6}$/i.test(hex)) return hex;
+  const rgb = hexToRgb(hex);
+  for (let t = 0; t <= 1.0001; t += 0.05) {
+    const c = rgb.map((v) => v + (255 - v) * t);
+    const h = toHex(c);
+    if (contrast(h, bg) >= min) return h;
+  }
+  return '#ffffff';
+}

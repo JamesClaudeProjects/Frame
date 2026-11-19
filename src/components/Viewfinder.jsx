@@ -1,5 +1,6 @@
 import React from 'react';
 import { project, blurDisc, fixtureHeight, fmt } from '../engine/engine.js';
+import { Tip } from './ui.jsx';
 
 const SKY = {
   golden: ['#e79a52', '#3a3550'], noon: ['#8fb8de', '#3b6a9a'], blue: ['#2b4682', '#0d1631'],
@@ -242,13 +243,11 @@ export default function Viewfinder({ scene, cam: camPose, metrics, transport, t 
     <div className="vf-wrap">
       {svgEl}
       <div className="vf-hud">
-        <span>{cam.f}mm</span><span>f/{cam.N}</span><span>{scene.inp.aspect}</span>
-        <span>tilt {r.tiltDeg >= 0 ? '+' : ''}{fmt(r.tiltDeg)}°</span>
-        {cam.dutch ? <span>dutch {fmt(cam.dutch)}°</span> : null}
-        <span>neg-space {fmt(r.negSpace, 0)}%</span>
-        <span>headroom {fmt(r.headroom, 0)}%</span>
-        {metrics && <span>dist {fmt(metrics.dist, 2)}m</span>}
-        {metrics && <span>focus {fmt(metrics.focus, 2)}m</span>}
+        <span className="vf-lens">{fmt(cam.f, 0)}mm · f/{cam.N} · {scene.inp.aspect}</span>
+        <Tip term="tilt"><span>tilt {r.tiltDeg >= 0 ? '+' : ''}{fmt(r.tiltDeg)}°</span></Tip>
+        {Math.abs(cam.dutch) > 0.3 ? <Tip term="dutch"><span>dutch {fmt(cam.dutch)}°</span></Tip> : null}
+        <Tip term="negSpace"><span>space {fmt(r.negSpace, 0)}%</span></Tip>
+        <Tip term="headroom"><span>headroom {fmt(r.headroom, 0)}%</span></Tip>
       </div>
       {transport}
     </div>

@@ -29,6 +29,8 @@ export default function Filmstrip({ scene, t, onSeek }) {
     if (Math.abs(f.m.keyStops) > 0.25) bits.push(`key ${f.m.keyStops > 0 ? '+' : ''}${fmt(f.m.keyStops, 1)} st`);
     if (move.rack) bits.push(`focus ${fmt(f.cam.focus, 2)}m`);
     bits.push(`key↔lens ${fmt(f.m.keyOff, 0)}°`);
+    const sm = scene.sound?.move?.samples;
+    if (sm) { const x = sm[Math.round(f.t * (sm.length - 1))]; bits.push(x.ok ? `🎙 ${fmt(x.snr, 0)} dB` : '🎙 lav'); }
     return bits.join(' · ');
   };
   const nearest = FRAMES.reduce((a, b) => (Math.abs(b - t) < Math.abs(a - t) ? b : a), 0);

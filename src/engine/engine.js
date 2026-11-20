@@ -4,7 +4,7 @@
 
 import { TIMES, ENVS, TONES, SENSORS, NEON } from './tables.js';
 import { solveMove, fixtureName } from './move.js';
-import { solveSound } from './sound.js';
+import { solveSound, trackSoundMove } from './sound.js';
 import { renderKelvin, shiftKelvin, nearestGel, mired, describeShift } from './color.js';
 
 const DEG = Math.PI / 180;
@@ -586,6 +586,8 @@ export function compute(inp) {
   theory.push(scene.sound.theory);
   scene.move = solveMove(scene, inp);
   if (scene.move.theory) theory.push(scene.move.theory);
+  scene.sound.move = trackSoundMove(scene, inp);
+  if (scene.sound.move) scene.sound.warnings.push(...scene.sound.move.warnings);
   return scene;
 }
 

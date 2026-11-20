@@ -269,3 +269,9 @@ input[type='range'] { width: 100%; accent-color: var(--accent); }
 .alert-sound { background: #2a2210; border-color: #6b5320; color: #ffd27a; }
 .alert-sound .dim { color: #cdb27a; }
 .vf .vf-snd { font-family: var(--mono); font-size: 10px; font-weight: 600; fill: #6ee7b7; paint-order: stroke; stroke: #000; stroke-width: 3px; }
+.snd-move { margin: 10px 0 6px; padding: 10px; border: 1px solid #22433a; background: #0f1a17; border-radius: 4px; }
+.snd-move-head { font-family: var(--mono); font-size: 11.5px; color: #9ff0cf; margin-bottom: 6px; }
+.snr-chart { width: 100%; height: auto; display: block; background: #0b1311; border-radius: 3px; }
+.snr-chart .snr-tick { font-family: var(--mono); font-size: 8px; fill: #8a92a1; }
+.snr-legend { display: flex; flex-wrap: wrap; gap: 4px 12px; font-family: var(--mono); font-size: 10.5px; margin: 5px 0 6px; }
+.snr-legend .lg-boom { color: #6ee7b7; } .snr-legend .lg-lav { color: #9aa2b1; } .snr-legend .lg-bad { color: #ff8a8d; } .snr-legend .lg-hand { color: #ffd27a; }

@@ -1,6 +1,7 @@
 import React from 'react';
 import { project, blurDisc, fixtureHeight, fmt } from '../engine/engine.js';
 import { Tip } from './ui.jsx';
+import { boomAt } from '../engine/sound.js';
 
 const SKY = {
   golden: ['#e79a52', '#3a3550'], noon: ['#8fb8de', '#3b6a9a'], blue: ['#2b4682', '#0d1631'],
@@ -226,8 +227,9 @@ export default function Viewfinder({ scene, cam: camPose, metrics, transport, t 
             {figures}
             {intruders}
           </g>
-          {soundLayer && scene.sound && scene.sound.boom && scene.sound.primary !== 'lav' && (() => {
-            const b = scene.sound.boom;
+          {soundLayer && scene.sound && (scene.sound.move ? scene.sound.move.plan !== 'lav' : scene.sound.primary !== 'lav') && (() => {
+            const b = boomAt(scene.sound, t);
+            if (!b || b.ok === false) return <text x={VW / 2} y={14} textAnchor="middle" className="vf-warn">BOOM OUT OF REACH — LAV</text>;
             const m = P({ x: b.mic.x, y: b.mic.y }, b.mic.z);
             const shadowPts = (b.bgPts ?? []).map((p) => P({ x: p.x, y: p.y }, p.z)).filter(Boolean);
             const mx = m ? clamp(m.x, 20, VW - 20) : VW / 2;

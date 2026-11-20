@@ -68,5 +68,8 @@ export const GLOSSARY = {
   micPattern: { title: 'Mic pattern', body: 'Hypercardioids are used indoors (shotguns colour badly in small rooms); short shotguns reach further outdoors. Both reject sound from the sides and rear.' },
   roomEcho: { title: 'Room echo', body: 'Rooms ring (reverb), parallel walls flutter, and a hard wall behind the subject returns a slap. Each needs different handling.' },
   wind: { title: 'Wind', body: 'Wind rumble overloads mics. A blimp and fur cover (dead cat) cut it by about 25 dB; strong wind needs a wind break too.' },
+  dialogue: { title: 'Dialogue coverage', body: 'One operator can swing the boom between two speakers if the mic only travels a short way between lines. Further apart, a second boom or a lav on the second speaker takes over.' },
+  soundMove: { title: 'Sound during the move', body: 'The boom is re-solved at every moment of the camera move: it must stay outside the moving frame line, keep its shadow out of shot, and beat the noise — including dolly, footsteps and motors.' },
+  perspective: { title: 'Sound perspective', body: 'As the picture widens the voice should sound a little further away, and closer as it tightens. A lav stays at one distance whatever the framing, so it can sound wrong on a big push or pull.' },
   storyboard: { title: 'Storyboard', body: 'Five real views through the lens across the move. Click a frame to jump there.' },
 };

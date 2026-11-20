@@ -80,3 +80,11 @@ After the hero frame is solved, every fixture is projected through the real lens
 
 Turn on the **sound** layer (or "plot" in the Sound section) to draw the boom operator, pole, mic pickup lobe, lav, critical-distance circle, noise-source rings and wind. Boom shadows show as red marks on the plot and in the viewfinder.
 
+## Sound (Phase B): moves and dialogue
+
+- **Boom through the move.** The boom is re-solved at 25 points across any camera move, against the moving frame line, pole-in-frame and shadow checks. One operator setup is chosen for the whole move: the one covering the most frames at the lowest cost. Gaps are reported as *out of reach* (cover with the lav) or *handoff* (a second operator takes over). The operator's walking distance and peak speed are reported.
+- **Rig noise at the mic.** Dolly wheels and track (scaled by speed), Steadicam or handheld operator footsteps, boom operator footsteps, a walking subject (plus lav clothing rustle), zoom motor and jib. Footstep levels depend on the floor surface. Anything within 6 dB of the noise floor is flagged with a fix.
+- **Sound perspective.** The change in mic distance is compared with the change in shot size. The result is *follows*, *steady* or *flat*, and flat comes with mixing advice.
+- **Dialogue.** One boom swings between speakers if the mic only travels ≤ 1.6 m between lines. Otherwise the planner looks for a clean second boom position on the other side, or falls back to a lav on the second speaker.
+- **UI.** A clean-margin timeline (boom vs lav, with out-of-reach, handoff and shadow bands and the playhead) in the Sound section. The live boom, operator path and mic path on the plot. Swing or second boom for dialogue. A live boom marker in the viewfinder, and 🎙 margins on storyboard frames.
+

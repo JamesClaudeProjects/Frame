@@ -198,7 +198,7 @@ export default function App() {
         <aside className="panel side">
           <h2 className="panel-title">Through the Lens</h2>
           <Viewfinder scene={scene} cam={pose} metrics={moving ? metrics : null} transport={transport} t={t} subjects={subjectsNow} soundLayer={!!layers.sound} />
-          <Readout scene={scene} move={move} metrics={metrics} soundLayer={!!layers.sound} onSoundLayer={() => setLayers((l) => ({ ...l, sound: !l.sound }))} />
+          <Readout scene={scene} move={move} metrics={metrics} t={t} soundLayer={!!layers.sound} onSoundLayer={() => setLayers((l) => ({ ...l, sound: !l.sound }))} />
         </aside>
 
         {moving && (

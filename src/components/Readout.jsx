@@ -1,13 +1,14 @@
 import React from 'react';
 import { fmt } from '../engine/engine.js';
 import { Section, Tip } from './ui.jsx';
+import { boomAt } from '../engine/sound.js';
 
 const Sw = ({ c }) => <i className="sw" style={{ background: c }} />;
 const dofStr = (d) => (d.total < 1 ? `${fmt(d.total * 100, 0)} cm` : Number.isFinite(d.total) ? `${fmt(d.total, 2)} m` : '∞');
 
 // Headline first (ratio + colour chips), everything else in collapsible sections that
 // show a one-line summary while closed. Each label carries a hover tag.
-export default function Readout({ scene, move, metrics, soundLayer, onSoundLayer }) {
+export default function Readout({ scene, move, metrics, soundLayer, onSoundLayer, t = 0 }) {
   const r = scene.readout;
   const L = scene.lights;
   const key = L.find((l) => l.role === 'key');
@@ -97,7 +98,7 @@ export default function Readout({ scene, move, metrics, soundLayer, onSoundLayer
         </div>
       )}
 
-      <SoundSection s={scene.sound} soundLayer={soundLayer} onSoundLayer={onSoundLayer} />
+      <SoundSection s={scene.sound} soundLayer={soundLayer} onSoundLayer={onSoundLayer} t={t} duration={move?.duration} />
 
       {moving && (
         <Section
@@ -174,8 +175,10 @@ export default function Readout({ scene, move, metrics, soundLayer, onSoundLayer
   );
 }
 
-function SoundSection({ s, soundLayer, onSoundLayer }) {
-  const b = s.boom;
+function SoundSection({ s, soundLayer, onSoundLayer, t, duration }) {
+  // During a move, the mic / frame-line / shadow rows follow the live boom position.
+  const live = s.move ? boomAt(s, t) : null;
+  const b = live ? (live.ok === false ? null : { ...live, face: live.shadow === 'face' ? { soft: false } : null, bg: live.shadow && live.shadow !== 'face' ? { surface: live.shadow, soft: false } : null }) : s.boom;
   const roomRow = s.room.kind === 'room'
     ? <><Tip term="rt60">{fmt(s.room.rt60, 2)} s reverb</Tip> · <Tip term="critDist">critical dist. {fmt(s.critDist, 2)} m</Tip></>
     : s.room.kind === 'flutter' ? <Tip term="roomEcho">{fmt(s.room.flutterMs, 0)} ms flutter echo ({fmt(s.room.flutterHz, 0)} Hz)</Tip>
@@ -194,16 +197,64 @@ function SoundSection({ s, soundLayer, onSoundLayer }) {
         <tbody>
           <tr><th><Tip term="snr">Clean margin</Tip></th><td colSpan={3}><b className={s.bestSnr >= 25 ? 'ok' : s.bestSnr >= 18 ? 'meh' : 'bad'}>{fmt(s.bestSnr, 0)} dB</b> on {s.primary === 'lav' ? 'lav' : 'boom'}{s.primary !== 'lav' && <span className="dim"> · lav would give {fmt(s.lav.snr, 0)} dB</span>}</td></tr>
           <tr><th><Tip term="voiceLevel">Voice</Tip></th><td>{fmt(s.voice, 0)} dB @ 1 m</td><th><Tip term="noiseFloor">Noise</Tip></th><td>{fmt(s.floor, 0)} dB</td></tr>
-          <tr><th><Tip term="micPattern">Mic</Tip></th><td colSpan={3}>{s.primary === 'lav' ? 'Lavalier (omni), 22 cm' : `${s.mic.name}, ${fmt(b.dist, 2)} m from mouth`}</td></tr>
-          {b && <tr><th><Tip term="frameLine">Frame line</Tip></th><td colSpan={3}>{Number.isFinite(s.frameTop) ? `top crosses subject at ${fmt(s.frameTop, 2)} m` : 'no top line'} · boom {b.from}, pole {fmt(b.pole, 1)} m</td></tr>}
+          <tr><th><Tip term="micPattern">Mic{live ? ' (now)' : ''}</Tip></th><td colSpan={3}>{(live ? s.move.plan === 'lav' : s.primary === 'lav') || !b ? (live && live.ok === false ? 'boom out of reach here — lav' : 'Lavalier (omni), 22 cm') : `${s.mic.name}, ${fmt(b.dist, 2)} m from mouth${live ? ` · ${fmt(live.snr, 0)} dB` : ''}`}</td></tr>
+          {b && <tr><th><Tip term="frameLine">Frame line</Tip></th><td colSpan={3}>{live ? `boom ${b.from} frame, pole ${fmt(b.pole, 1)} m${live.handoff ? ' · 2nd operator' : ''}` : `${Number.isFinite(s.frameTop) ? `top crosses subject at ${fmt(s.frameTop, 2)} m` : 'no top line'} · boom ${b.from}, pole ${fmt(b.pole, 1)} m`}</td></tr>}
           {b && s.primary !== 'lav' && <tr><th><Tip term="boomShadow">Boom shadow</Tip></th><td colSpan={3} className={shadow === 'clear' ? '' : 'warn-text'}>{shadow}</td></tr>}
           <tr><th><Tip term="roomEcho">Room</Tip></th><td colSpan={3}>{roomRow}</td></tr>
           {s.wind && <tr><th><Tip term="wind">Wind</Tip></th><td colSpan={3}>{s.wind}, ~{fmt(s.windSpeed, 0)} m/s</td></tr>}
+          {s.dialogue && (
+            <tr><th><Tip term="dialogue">Dialogue</Tip></th><td colSpan={3}>
+              {s.dialogue.plan === 'swing' ? `one boom swings ${fmt(s.dialogue.travel, 2)} m between A and B` : s.dialogue.plan === 'two' ? `second boom on B (${fmt(s.dialogue.second.snr, 0)} dB)` : 'boom on A, lav on B'}
+              <span className="dim"> · {fmt(s.dialogue.sep, 1)} m apart</span>
+            </td></tr>
+          )}
         </tbody>
       </table>
+      {s.move && <SoundMove m={s.move} t={t} duration={duration} />}
       {s.gear.map((g) => <div key={g} className="move-gear">🎙 {g}</div>)}
       {s.notes.map((n) => <div key={n} className="sound-note">· {n}</div>)}
       {s.warnings.map((w) => <div key={w} className="move-warn">⚠ {w}</div>)}
     </Section>
+  );
+}
+
+// Clean-margin timeline across the move: boom (solid) and lav (dashed) against the 25 / 18 dB
+// lines, with red bands where the boom is out of reach, handed off or throwing a shadow.
+function SoundMove({ m, t, duration }) {
+  const W = 300, H = 64, pad = 4;
+  const vals = m.samples.flatMap((x) => [x.snr, x.lavSnr]).filter((v) => v != null);
+  const lo = Math.min(10, ...vals) - 2, hi = Math.max(40, ...vals) + 2;
+  const X = (tt) => pad + tt * (W - 2 * pad);
+  const Y = (v) => H - pad - ((v - lo) / (hi - lo)) * (H - 2 * pad);
+  const line = (key) => {
+    let d = '', pen = false;
+    m.samples.forEach((x) => { const v = x[key]; if (v == null || !x.ok && key === 'snr') { pen = false; return; } d += `${pen ? 'L' : 'M'}${X(x.t)},${Y(v)} `; pen = true; });
+    return d;
+  };
+  const band = (sp, i, col) => <rect key={col + i} x={X(sp[0]) - 2} width={Math.max(X(sp[1]) - X(sp[0]), 0) + 4} y={pad} height={H - 2 * pad} fill={col} opacity="0.22" />;
+  const plan = m.plan === 'boom' ? 'boom tracks the whole move' : m.plan === 'lav' ? 'lav carries the move' : 'boom with lav backup';
+  return (
+    <div className="snd-move">
+      <div className="snd-move-head"><Tip term="soundMove"><span>During the move</span></Tip> <span className="dim">· {plan}</span></div>
+      <svg viewBox={`0 0 ${W} ${H}`} className="snr-chart" role="img" aria-label="Clean margin across the move">
+        {m.noBoom.map((sp, i) => band(sp, i, '#ff5a5f'))}
+        {(m.handoffSpans ?? []).map((sp, i) => band(sp, i, '#ffd27a'))}
+        {m.shadowSpans.map((sp, i) => band(sp, i, '#ff5a5f'))}
+        {[25, 18].map((v) => <g key={v}><line x1={pad} x2={W - pad} y1={Y(v)} y2={Y(v)} stroke="#4a5262" strokeDasharray="3 4" /><text x={W - pad} y={Y(v) - 2} textAnchor="end" className="snr-tick">{v} dB</text></g>)}
+        <path d={line('lavSnr')} fill="none" stroke="#9aa2b1" strokeWidth="1.2" strokeDasharray="3 3" />
+        <path d={line('snr')} fill="none" stroke="#6ee7b7" strokeWidth="2" />
+        <line x1={X(t)} x2={X(t)} y1={pad} y2={H - pad} stroke="#f5b041" strokeWidth="1.5" />
+      </svg>
+      <div className="snr-legend"><span className="lg-boom">— boom</span><span className="lg-lav">- - lav</span><span className="lg-bad">▮ out of reach / shadow</span>{(m.handoffSpans ?? []).length > 0 && <span className="lg-hand">▮ handoff</span>}</div>
+      <table className="stats">
+        <tbody>
+          {m.minBoom && <tr><th>Weakest boom</th><td colSpan={3}>{fmt(m.minBoom.snr, 0)} dB at {fmt(m.minBoom.t * duration, 1)} s</td></tr>}
+          <tr><th>Weakest lav</th><td colSpan={3}>{fmt(m.minLav.lavSnr, 0)} dB at {fmt(m.minLav.t * duration, 1)} s</td></tr>
+          {m.opTravel > 0.3 && <tr><th>Boom op walks</th><td colSpan={3}>{fmt(m.opTravel, 1)} m · peak {fmt(m.opPeak, 2)} m/s</td></tr>}
+          <tr><th><Tip term="perspective">Perspective</Tip></th><td colSpan={3}>{m.perspective.verdict === 'follows' ? 'follows the picture' : m.perspective.verdict === 'steady' ? 'steady (shot size holds)' : 'flat — stays put while the picture changes'}</td></tr>
+        </tbody>
+      </table>
+      {m.notes.map((n) => <div key={n} className="sound-note">· {n}</div>)}
+    </div>
   );
 }

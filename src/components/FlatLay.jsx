@@ -1,6 +1,7 @@
 import React, { forwardRef } from 'react';
 import { fmt, depthOfField } from '../engine/engine.js';
 import { renderKelvin, readable } from '../engine/color.js';
+import { boomAt } from '../engine/sound.js';
 
 const W = 1000, H = 720;
 const DEG = Math.PI / 180;
@@ -234,7 +235,7 @@ const FlatLay = forwardRef(function FlatLay({ scene, layers, cam: camPose, t = 1
         labels.push({ ax: c.x, ay: c.y, x: c.x + sw * 0.55, y: c.y - sw * 0.45, lines: [{ t: s.label, cls: 'lbl lbl-subj' }] });
       })}
 
-      {layers.sound && scene.sound && <SoundLayer s={scene.sound} scene={scene} T={T} k={k} labels={layers.labels ? labels : null} />}
+      {layers.sound && scene.sound && <SoundLayer s={scene.sound} scene={scene} T={T} k={k} t={t} subjects={subjects} labels={layers.labels ? labels : null} />}
 
       {/* Fixtures */}
       {scene.lights.map((l) => <Fixture key={'fx' + l.id} l={l} T={T} k={k} icon={icon} />)}
@@ -371,7 +372,7 @@ function MovePath({ move, T, k, tanH, farY, labels }) {
 // Sound plan overlay: noise sources (ring = where they fall to the noise floor), critical
 // distance, boom operator → pole → mic with its pickup lobe, lav, wind, boom-shadow hits.
 const SND = '#6ee7b7';
-function SoundLayer({ s, scene, T, k, labels }) {
+function SoundLayer({ s, scene, T, k, t, subjects, labels }) {
   const els = [];
   const lbl = (p, lines) => labels && labels.push({ ax: p.x, ay: p.y, x: p.x + 10, y: p.y - 6, lines });
   s.sources.forEach((src, i) => {
@@ -385,7 +386,16 @@ function SoundLayer({ s, scene, T, k, labels }) {
     const y = T({ x: 0, y: scene.bgY - 2.6 }).y;
     els.push(<rect key="traffic" x={0} y={y - 6} width={W} height={12} fill="#ff9f6b" opacity="0.1" />);
   }
-  s.mouths.forEach((m, i) => {
+  const mouthsNow = subjects.filter((x) => !x.extra).map((x) => ({ x: x.x + Math.cos(x.facing) * 0.09, y: x.y + Math.sin(x.facing) * 0.09 }));
+  // operator's walking path and the mic's path during a move
+  if (s.move) {
+    const ok = s.move.samples.filter((x) => x.ok && !x.handoff);
+    if (ok.length > 1) {
+      els.push(<polyline key="oppath" points={ok.map((x) => { const q = T(x.op); return `${q.x},${q.y}`; }).join(' ')} fill="none" stroke={SND} strokeWidth="1" strokeDasharray="2 4" opacity="0.6" />);
+      els.push(<polyline key="micpath" points={ok.map((x) => { const q = T(x.mic); return `${q.x},${q.y}`; }).join(' ')} fill="none" stroke={SND} strokeWidth="1" strokeDasharray="1 3" opacity="0.45" />);
+    }
+  }
+  mouthsNow.forEach((m, i) => {
     const c = T(m);
     if (Number.isFinite(s.critDist) && i === 0) {
       els.push(<circle key="dc" cx={c.x} cy={c.y} r={s.critDist * k} fill="none" stroke={SND} strokeWidth="1" strokeDasharray="6 4" opacity="0.7" />);
@@ -397,9 +407,27 @@ function SoundLayer({ s, scene, T, k, labels }) {
       if (i === 0) lbl({ x: ch.x, y: ch.y + 10 }, [{ t: `LAV · ${fmt(s.lav.snr, 0)} dB clean`, cls: 'lbl', fill: SND }]);
     }
   });
-  const b = s.boom;
-  if (b) {
-    const op = T(b.op), mic = T(b.mic), mouth = T(s.mouth);
+  const b = boomAt(s, t);
+  if (b && b.ok === false) {
+    const c = T(mouthsNow[0]);
+    els.push(<text key="nob" x={c.x + 12} y={c.y + 26} className="lbl" style={{ ...halo, fill: '#ff8a8d' }}>BOOM OUT OF REACH HERE</text>);
+  }
+  // dialogue: where the mic swings to for B, or the second boom
+  if (s.dialogue && !s.move) {
+    const d = s.dialogue;
+    if (d.plan === 'swing' && d.swingB) {
+      const a1 = T(s.boom.mic), a2 = T(d.swingB.mic);
+      els.push(<path key="swing" d={`M${a1.x},${a1.y} L${a2.x},${a2.y}`} stroke={SND} strokeWidth="1.2" strokeDasharray="5 3" markerEnd="" opacity="0.8" />);
+      els.push(<circle key="micB" cx={a2.x} cy={a2.y} r={3.5} fill="none" stroke={SND} strokeWidth="1.5" />);
+      lbl(a2, [{ t: `SWING TO B · ${fmt(d.travel, 2)} m`, cls: 'lbl', fill: SND }]);
+    } else if (d.plan === 'two' && d.second) {
+      const o2 = T(d.second.op), m2 = T(d.second.mic);
+      els.push(<line key="pole2" x1={o2.x} y1={o2.y} x2={m2.x} y2={m2.y} stroke={SND} strokeWidth="2" />, <circle key="op2" cx={o2.x} cy={o2.y} r={7} fill="#13241d" stroke={SND} strokeWidth="1.5" />, <circle key="mic2" cx={m2.x} cy={m2.y} r={3.5} fill={SND} />);
+      lbl(o2, [{ t: 'BOOM OP 2 (B)', cls: 'lbl', fill: SND }]);
+    }
+  }
+  if (b && b.ok !== false) {
+    const op = T(b.op), mic = T(b.mic), mouth = T(mouthsNow[0]);
     const primary = s.primary !== 'lav';
     els.push(<line key="pole" x1={op.x} y1={op.y} x2={mic.x} y2={mic.y} stroke={SND} strokeWidth={primary ? 2.5 : 1.2} strokeDasharray={primary ? 'none' : '4 4'} opacity={primary ? 0.95 : 0.5} />);
     els.push(<circle key="op" cx={op.x} cy={op.y} r={8} fill="#13241d" stroke={SND} strokeWidth="1.5" opacity={primary ? 1 : 0.6} />);
@@ -415,7 +443,7 @@ function SoundLayer({ s, scene, T, k, labels }) {
     els.push(<polygon key="lobe" points={pts.join(' ')} fill={SND} fillOpacity="0.12" stroke={SND} strokeWidth="1" opacity={primary ? 1 : 0.5} />);
     els.push(<circle key="mic" cx={mic.x} cy={mic.y} r={4} fill={SND} />);
     lbl(op, [{ t: `BOOM OP${Math.abs(b.side) === 2 ? ' (over camera)' : ''}`, cls: 'lbl', fill: SND }, { t: `${fmt(b.pole, 1)} m pole · ${b.from} frame`, cls: 'lbl lbl-dim' }]);
-    lbl(mic, [{ t: `MIC · ${fmt(b.dist, 2)} m · ${fmt(b.snr, 0)} dB clean`, cls: 'lbl', fill: SND }, { t: `${s.mic.name} @ ${fmt(b.mic.z, 2)} m high`, cls: 'lbl lbl-dim' }]);
+    lbl(mic, [{ t: `MIC · ${fmt(b.dist, 2)} m · ${fmt(b.snr, 0)} dB clean${b.handoff ? ' · 2nd op' : ''}`, cls: 'lbl', fill: SND }, { t: `${s.mic.name} @ ${fmt(b.mic.z, 2)} m high`, cls: 'lbl lbl-dim' }]);
     if (primary) (b.bgPts ?? []).forEach((p, i) => {
       const q = T(p);
       els.push(<path key={'bs' + i} d={`M${q.x - 4},${q.y - 4} L${q.x + 4},${q.y + 4} M${q.x + 4},${q.y - 4} L${q.x - 4},${q.y + 4}`} stroke="#ff5a5f" strokeWidth="1.5" opacity={p.soft ? 0.5 : 0.95} />);

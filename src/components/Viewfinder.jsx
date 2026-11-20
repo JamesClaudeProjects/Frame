@@ -9,7 +9,7 @@ const SKY = {
 const GROUND = { grass: '#1e281a', asphalt: '#1d1e22', wet: '#121119', floor: '#2a221d', void: '#060607' };
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 
-export default function Viewfinder({ scene, cam: camPose, metrics, transport, t = 1, subjects: subjOverride, uid = 'vf', bare = false, width }) {
+export default function Viewfinder({ scene, cam: camPose, metrics, transport, t = 1, subjects: subjOverride, uid = 'vf', bare = false, width, soundLayer = false }) {
   const U = (id) => `${uid}-${id}`;
   const subjects = subjOverride ?? scene.subjects;
   const cam = camPose ?? scene.camera;
@@ -226,6 +226,20 @@ export default function Viewfinder({ scene, cam: camPose, metrics, transport, t 
             {figures}
             {intruders}
           </g>
+          {soundLayer && scene.sound && scene.sound.boom && scene.sound.primary !== 'lav' && (() => {
+            const b = scene.sound.boom;
+            const m = P({ x: b.mic.x, y: b.mic.y }, b.mic.z);
+            const shadowPts = (b.bgPts ?? []).map((p) => P({ x: p.x, y: p.y }, p.z)).filter(Boolean);
+            const mx = m ? clamp(m.x, 20, VW - 20) : VW / 2;
+            return (
+              <g>
+                {shadowPts.length > 1 && <polyline points={shadowPts.map((p) => `${p.x},${p.y}`).join(' ')} fill="none" stroke="#000" strokeOpacity="0.55" strokeWidth="5" />}
+                {shadowPts.length > 0 && <text x={clamp(shadowPts[0].x + 8, 4, VW - 130)} y={clamp(shadowPts[0].y - 6, 12, VH - 4)} className="vf-warn">BOOM SHADOW</text>}
+                <path d={b.from === 'above' ? `M${mx - 7},2 L${mx + 7},2 L${mx},11 Z` : `M${mx - 7},${VH - 2} L${mx + 7},${VH - 2} L${mx},${VH - 11} Z`} fill="#6ee7b7" />
+                <text x={mx + 10} y={b.from === 'above' ? 12 : VH - 6} className="vf-snd">BOOM {b.from === 'above' ? '▲ above' : '▼ below'} frame · {fmt(b.dist, 2)} m</text>
+              </g>
+            );
+          })()}
           {camShadow && <text x={VW / 2} y={VH - 10} textAnchor="middle" className="vf-warn">CAMERA SHADOW ON SUBJECT</text>}
           {/* overlays */}
           <g className="vf-thirds">

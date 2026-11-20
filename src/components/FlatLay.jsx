@@ -234,6 +234,8 @@ const FlatLay = forwardRef(function FlatLay({ scene, layers, cam: camPose, t = 1
         labels.push({ ax: c.x, ay: c.y, x: c.x + sw * 0.55, y: c.y - sw * 0.45, lines: [{ t: s.label, cls: 'lbl lbl-subj' }] });
       })}
 
+      {layers.sound && scene.sound && <SoundLayer s={scene.sound} scene={scene} T={T} k={k} labels={layers.labels ? labels : null} />}
+
       {/* Fixtures */}
       {scene.lights.map((l) => <Fixture key={'fx' + l.id} l={l} T={T} k={k} icon={icon} />)}
       {layers.labels && scene.lights.forEach((l) => { const lb = fixtureLabel(l, T, k, icon); if (lb) labels.push(lb); })}
@@ -364,6 +366,66 @@ function MovePath({ move, T, k, tanH, farY, labels }) {
     });
   }
   return <g>{els}</g>;
+}
+
+// Sound plan overlay: noise sources (ring = where they fall to the noise floor), critical
+// distance, boom operator → pole → mic with its pickup lobe, lav, wind, boom-shadow hits.
+const SND = '#6ee7b7';
+function SoundLayer({ s, scene, T, k, labels }) {
+  const els = [];
+  const lbl = (p, lines) => labels && labels.push({ ax: p.x, ay: p.y, x: p.x + 10, y: p.y - 6, lines });
+  s.sources.forEach((src, i) => {
+    const c = T(src.pos);
+    const r = Math.min(10 ** ((src.l1 - s.floor) / 20), 40) * k;
+    els.push(<circle key={'ns' + i} cx={c.x} cy={c.y} r={r} fill="none" stroke="#ff9f6b" strokeWidth="1" strokeDasharray="3 5" opacity="0.7" />);
+    if (src.moveTo) els.push(<circle key={'nm' + i} cx={c.x} cy={c.y} r={Math.min(src.moveTo, 60) * k} fill="none" stroke="#ff9f6b" strokeWidth="0.8" strokeDasharray="1 6" opacity="0.5" />);
+    lbl({ x: c.x + r * 0.7, y: c.y - r * 0.7 }, [{ t: `${src.name.toUpperCase()} · ${src.l1} dB@1m`, cls: 'lbl', fill: '#ff9f6b' }, { t: src.moveTo ? `move ≥ ${fmt(Math.ceil(src.moveTo), 0)} m away` : `audible within ${fmt(10 ** ((src.l1 - s.floor) / 20), 1)} m`, cls: 'lbl lbl-dim' }]);
+  });
+  if (scene.set.kind === 'neon') {
+    const y = T({ x: 0, y: scene.bgY - 2.6 }).y;
+    els.push(<rect key="traffic" x={0} y={y - 6} width={W} height={12} fill="#ff9f6b" opacity="0.1" />);
+  }
+  s.mouths.forEach((m, i) => {
+    const c = T(m);
+    if (Number.isFinite(s.critDist) && i === 0) {
+      els.push(<circle key="dc" cx={c.x} cy={c.y} r={s.critDist * k} fill="none" stroke={SND} strokeWidth="1" strokeDasharray="6 4" opacity="0.7" />);
+      lbl({ x: c.x + s.critDist * k * 0.71, y: c.y + s.critDist * k * 0.71 }, [{ t: `critical distance ${fmt(s.critDist, 2)} m`, cls: 'lbl', fill: SND }]);
+    }
+    if (s.primary !== 'boom') {
+      const ch = T({ x: m.x, y: m.y - 0.05 });
+      els.push(<rect key={'lav' + i} x={ch.x - 3.5} y={ch.y + 6} width={7} height={7} fill={SND} stroke="#0d0f13" strokeWidth="1" />);
+      if (i === 0) lbl({ x: ch.x, y: ch.y + 10 }, [{ t: `LAV · ${fmt(s.lav.snr, 0)} dB clean`, cls: 'lbl', fill: SND }]);
+    }
+  });
+  const b = s.boom;
+  if (b) {
+    const op = T(b.op), mic = T(b.mic), mouth = T(s.mouth);
+    const primary = s.primary !== 'lav';
+    els.push(<line key="pole" x1={op.x} y1={op.y} x2={mic.x} y2={mic.y} stroke={SND} strokeWidth={primary ? 2.5 : 1.2} strokeDasharray={primary ? 'none' : '4 4'} opacity={primary ? 0.95 : 0.5} />);
+    els.push(<circle key="op" cx={op.x} cy={op.y} r={8} fill="#13241d" stroke={SND} strokeWidth="1.5" opacity={primary ? 1 : 0.6} />);
+    // hypercardioid lobe, r(θ) = |0.25 + 0.75 cos θ|, aimed from the mic to the mouth
+    const a = Math.atan2(mouth.y - mic.y, mouth.x - mic.x);
+    const R = Math.max(0.45 * k, 18);
+    const pts = [];
+    for (let i = 0; i <= 72; i++) {
+      const th = (i / 72) * Math.PI * 2;
+      const r = Math.abs(0.25 + 0.75 * Math.cos(th)) * R;
+      pts.push(`${mic.x + Math.cos(a + th) * r},${mic.y + Math.sin(a + th) * r}`);
+    }
+    els.push(<polygon key="lobe" points={pts.join(' ')} fill={SND} fillOpacity="0.12" stroke={SND} strokeWidth="1" opacity={primary ? 1 : 0.5} />);
+    els.push(<circle key="mic" cx={mic.x} cy={mic.y} r={4} fill={SND} />);
+    lbl(op, [{ t: `BOOM OP${Math.abs(b.side) === 2 ? ' (over camera)' : ''}`, cls: 'lbl', fill: SND }, { t: `${fmt(b.pole, 1)} m pole · ${b.from} frame`, cls: 'lbl lbl-dim' }]);
+    lbl(mic, [{ t: `MIC · ${fmt(b.dist, 2)} m · ${fmt(b.snr, 0)} dB clean`, cls: 'lbl', fill: SND }, { t: `${s.mic.name} @ ${fmt(b.mic.z, 2)} m high`, cls: 'lbl lbl-dim' }]);
+    if (primary) (b.bgPts ?? []).forEach((p, i) => {
+      const q = T(p);
+      els.push(<path key={'bs' + i} d={`M${q.x - 4},${q.y - 4} L${q.x + 4},${q.y + 4} M${q.x + 4},${q.y - 4} L${q.x - 4},${q.y + 4}`} stroke="#ff5a5f" strokeWidth="1.5" opacity={p.soft ? 0.5 : 0.95} />);
+    });
+  }
+  if (s.wind) {
+    const x = W - 130, y = 60;
+    els.push(<g key="wind"><path d={`M${x},${y} h60 m-8,-5 l8,5 l-8,5`} fill="none" stroke={SND} strokeWidth="1.5" /><text x={x} y={y - 8} className="lbl" style={{ fill: SND }}>WIND {s.wind.toUpperCase()} ~{fmt(s.windSpeed, 0)} m/s</text></g>);
+  }
+  return <g className="sound-layer">{els}</g>;
 }
 
 function SetGeometry({ scene, T, k }) {

@@ -31,7 +31,9 @@ export default function App() {
     focal: 50, aperture: 2, aspect: '2.39:1', seed: 1,
     move: 'auto', moveAmt: 0.6, moveDur: null, support: 'auto',
   });
-  const [layers, setLayers] = usePersist('layers', { fov: true, dof: true, beams: true, shadows: true, guides: true, labels: true, details: false });
+  const LAYER_DEFAULTS = { fov: true, dof: true, beams: true, shadows: true, guides: true, labels: true, details: false, sound: false };
+  const [layersRaw, setLayers] = usePersist('layers', LAYER_DEFAULTS);
+  const layers = { ...LAYER_DEFAULTS, ...layersRaw }; // new layers appear for returning users
   const [notesOpen, setNotesOpen] = useState(false);
   const set = (k) => (v) => setInp((s) => ({ ...s, [k]: v }));
   const scene = useMemo(() => compute(inp), [inp]);
@@ -195,8 +197,8 @@ export default function App() {
 
         <aside className="panel side">
           <h2 className="panel-title">Through the Lens</h2>
-          <Viewfinder scene={scene} cam={pose} metrics={moving ? metrics : null} transport={transport} t={t} subjects={subjectsNow} />
-          <Readout scene={scene} move={move} metrics={metrics} />
+          <Viewfinder scene={scene} cam={pose} metrics={moving ? metrics : null} transport={transport} t={t} subjects={subjectsNow} soundLayer={!!layers.sound} />
+          <Readout scene={scene} move={move} metrics={metrics} soundLayer={!!layers.sound} onSoundLayer={() => setLayers((l) => ({ ...l, sound: !l.sound }))} />
         </aside>
 
         {moving && (

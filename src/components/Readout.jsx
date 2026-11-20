@@ -7,7 +7,7 @@ const dofStr = (d) => (d.total < 1 ? `${fmt(d.total * 100, 0)} cm` : Number.isFi
 
 // Headline first (ratio + colour chips), everything else in collapsible sections that
 // show a one-line summary while closed. Each label carries a hover tag.
-export default function Readout({ scene, move, metrics }) {
+export default function Readout({ scene, move, metrics, soundLayer, onSoundLayer }) {
   const r = scene.readout;
   const L = scene.lights;
   const key = L.find((l) => l.role === 'key');
@@ -90,6 +90,15 @@ export default function Readout({ scene, move, metrics }) {
         </div>
       )}
 
+      {scene.sound.warnings.length > 0 && (
+        <div className="alert alert-sound" role="status">
+          <Tip term="sound"><span>🎙 {scene.sound.warnings.length} sound {scene.sound.warnings.length === 1 ? 'issue' : 'issues'}</span></Tip>
+          <span className="dim"> — open “Sound” below</span>
+        </div>
+      )}
+
+      <SoundSection s={scene.sound} soundLayer={soundLayer} onSoundLayer={onSoundLayer} />
+
       {moving && (
         <Section
           id="r-move"
@@ -162,5 +171,39 @@ export default function Readout({ scene, move, metrics }) {
         </ul>
       </Section>
     </div>
+  );
+}
+
+function SoundSection({ s, soundLayer, onSoundLayer }) {
+  const b = s.boom;
+  const roomRow = s.room.kind === 'room'
+    ? <><Tip term="rt60">{fmt(s.room.rt60, 2)} s reverb</Tip> · <Tip term="critDist">critical dist. {fmt(s.critDist, 2)} m</Tip></>
+    : s.room.kind === 'flutter' ? <Tip term="roomEcho">{fmt(s.room.flutterMs, 0)} ms flutter echo ({fmt(s.room.flutterHz, 0)} Hz)</Tip>
+      : s.room.kind === 'slap' ? <Tip term="roomEcho">{fmt(s.room.slapMs, 0)} ms slap off the storefront</Tip>
+        : <Tip term="roomEcho">open air — no reverb</Tip>;
+  const shadow = !b ? '—' : b.face ? `on the face${b.face.soft ? ' (soft, faint)' : ''}` : b.bg ? `on the ${b.bg.surface} in frame${b.bg.soft ? ' (soft, faint)' : ''}` : 'clear';
+  return (
+    <Section
+      id="r-sound"
+      title="Sound"
+      summary={s.summary}
+      defaultOpen={false}
+      aside={<button type="button" className={`mini-toggle${soundLayer ? ' on' : ''}`} aria-pressed={soundLayer} onClick={onSoundLayer} title="Show the sound plan on the lighting plot">{soundLayer ? '◉' : '○'} plot</button>}
+    >
+      <table className="stats">
+        <tbody>
+          <tr><th><Tip term="snr">Clean margin</Tip></th><td colSpan={3}><b className={s.bestSnr >= 25 ? 'ok' : s.bestSnr >= 18 ? 'meh' : 'bad'}>{fmt(s.bestSnr, 0)} dB</b> on {s.primary === 'lav' ? 'lav' : 'boom'}{s.primary !== 'lav' && <span className="dim"> · lav would give {fmt(s.lav.snr, 0)} dB</span>}</td></tr>
+          <tr><th><Tip term="voiceLevel">Voice</Tip></th><td>{fmt(s.voice, 0)} dB @ 1 m</td><th><Tip term="noiseFloor">Noise</Tip></th><td>{fmt(s.floor, 0)} dB</td></tr>
+          <tr><th><Tip term="micPattern">Mic</Tip></th><td colSpan={3}>{s.primary === 'lav' ? 'Lavalier (omni), 22 cm' : `${s.mic.name}, ${fmt(b.dist, 2)} m from mouth`}</td></tr>
+          {b && <tr><th><Tip term="frameLine">Frame line</Tip></th><td colSpan={3}>{Number.isFinite(s.frameTop) ? `top crosses subject at ${fmt(s.frameTop, 2)} m` : 'no top line'} · boom {b.from}, pole {fmt(b.pole, 1)} m</td></tr>}
+          {b && s.primary !== 'lav' && <tr><th><Tip term="boomShadow">Boom shadow</Tip></th><td colSpan={3} className={shadow === 'clear' ? '' : 'warn-text'}>{shadow}</td></tr>}
+          <tr><th><Tip term="roomEcho">Room</Tip></th><td colSpan={3}>{roomRow}</td></tr>
+          {s.wind && <tr><th><Tip term="wind">Wind</Tip></th><td colSpan={3}>{s.wind}, ~{fmt(s.windSpeed, 0)} m/s</td></tr>}
+        </tbody>
+      </table>
+      {s.gear.map((g) => <div key={g} className="move-gear">🎙 {g}</div>)}
+      {s.notes.map((n) => <div key={n} className="sound-note">· {n}</div>)}
+      {s.warnings.map((w) => <div key={w} className="move-warn">⚠ {w}</div>)}
+    </Section>
   );
 }

@@ -55,5 +55,18 @@ export const GLOSSARY = {
   keyStops: { title: 'Key level change', body: 'Light on the face compared with the final mark, from inverse-square falloff as the subject walks. Negative = darker.' },
   inShot: { title: 'Light in shot', body: 'A fixture or its stand enters the frame at this point of the move. The note gives a fix such as booming it higher or flying it.' },
   speed: { title: 'Peak speed', body: 'Moves ease in and out, so the fastest moment is about 1.5× the average. Above ~1.2 m/s is hard for a dolly grip.' },
+  // --- Sound
+  sound: { title: 'Sound plan', body: 'Where the microphone goes for the cleanest dialogue that still matches the picture. Levels are planning estimates from typical values, not measurements.' },
+  voiceLevel: { title: 'Voice level', body: 'How loud the delivery is at 1 m, set by the mood. In loud places people speak up by themselves (the Lombard effect), so it rises with the noise.' },
+  noiseFloor: { title: 'Noise floor', body: 'The background noise of the location at this time of day, plus nearby sources like neon ballasts or HMI fans.' },
+  snr: { title: 'Signal-to-noise', body: 'How far the voice sits above the background at the mic. 25 dB+ is clean dialogue; 18 dB is usable with cleanup; below that, plan wild lines or ADR.' },
+  rt60: { title: 'Reverb time (RT60)', body: 'How long the room rings after a sound. Living rooms are around 0.4–0.7 s; bare hard rooms over 1 s sound hollow on dialogue.' },
+  critDist: { title: 'Critical distance', body: 'Inside this distance the mic hears more direct voice than room echo. Staying well inside it keeps dialogue dry and clear.' },
+  frameLine: { title: 'Frame line', body: 'Where the top (or bottom) of the picture crosses the subject. The boom must stay just outside it, which sets how close it can get.' },
+  boomShadow: { title: 'Boom shadow', body: 'The boom pole can block a light and throw a shadow onto the face or a wall in shot. The planner tries each operator position and picks one that keeps the shadow out.' },
+  lav: { title: 'Lavalier', body: 'A tiny mic hidden in wardrobe. Very close to the mouth so it beats noise, but it sounds close regardless of the shot size and can pick up clothing rustle.' },
+  micPattern: { title: 'Mic pattern', body: 'Hypercardioids are used indoors (shotguns colour badly in small rooms); short shotguns reach further outdoors. Both reject sound from the sides and rear.' },
+  roomEcho: { title: 'Room echo', body: 'Rooms ring (reverb), parallel walls flutter, and a hard wall behind the subject returns a slap. Each needs different handling.' },
+  wind: { title: 'Wind', body: 'Wind rumble overloads mics. A blimp and fur cover (dead cat) cut it by about 25 dB; strong wind needs a wind break too.' },
   storyboard: { title: 'Storyboard', body: 'Five real views through the lens across the move. Click a frame to jump there.' },
 };

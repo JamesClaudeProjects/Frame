@@ -259,3 +259,13 @@ input[type='range'] { width: 100%; accent-color: var(--accent); }
 
 /* fixtures: hover target on the plot */
 .flatlay .fx { cursor: help; }
+
+/* ===== Sound ===== */
+.mini-toggle { background: var(--panel-2); border: 1px solid var(--line); border-radius: 3px; padding: 3px 8px; font-family: var(--mono); font-size: 11px; color: var(--dim); cursor: pointer; white-space: nowrap; }
+.mini-toggle.on { color: #6ee7b7; border-color: #2f6f58; background: #10221b; }
+.stats b.ok { color: #6ee7b7; } .stats b.meh { color: #ffd27a; } .stats b.bad { color: #ff8a8d; }
+.stats .warn-text { color: #ff8a8d; }
+.sound-note { font-size: 12px; color: var(--dim); margin-top: 4px; line-height: 1.45; }
+.alert-sound { background: #2a2210; border-color: #6b5320; color: #ffd27a; }
+.alert-sound .dim { color: #cdb27a; }
+.vf .vf-snd { font-family: var(--mono); font-size: 10px; font-weight: 600; fill: #6ee7b7; paint-order: stroke; stroke: #000; stroke-width: 3px; }

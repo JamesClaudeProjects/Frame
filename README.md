@@ -65,3 +65,18 @@ The plot draws the dolly track, ghost frustums at both marks, pedestal travel an
 
 After the hero frame is solved, every fixture is projected through the real lens (height, tilt and FOV). Anything whose head or stand would be in shot is raised (overhead rigs) or cheated wider. During a move, every sampled pose is checked again. A fixture or stand that enters frame is flagged with when it happens and a fix (e.g. "boom it to 3.1 m on a C-stand arm"). The engine also flags when the camera rig passes between the key and the subject (camera shadow on the face) and when the camera crosses the 180° line. Conflicts appear as red rings on the plot and as red markers in the viewfinder at the moment they happen.
 
+## Sound (Phase A)
+
+`src/engine/sound.js` plans production sound for the hero frame. Levels are planning estimates from typical values, not measurements.
+
+| Output | Model |
+|---|---|
+| Voice level | Set by mood (≈50 dB at 1 m for intimate, 66 dB for heroic), plus the Lombard effect: people speak up ~0.5 dB per dB of noise above 45 dBA |
+| Noise floor | Location × time of day, plus point sources by inverse square: neon ballast hum, and HMI ballast fans (with the distance needed to drop them 10 dB under the floor) |
+| Room | Interiors: Sabine reverb `RT60 = 0.161·V / A` from room size and surfaces (glass, floor, furnishings, cast and crew, black flags), and critical distance `0.057·√(Q·V/RT60)`. Alleys: flutter echo between parallel walls. Neon street: slap off the storefront. Field: open air |
+| Boom geometry | The frame's top and bottom lines at the subject are solved through the real lens. The mic sits 15 cm outside frame. Operator positions (either side, or beside the camera) are rejected if the pole would dip into frame |
+| Boom shadows | The pole's shadow from key, rim and sun is cast onto floor and walls and checked against the frame, and onto the light-to-face path. The planner picks the position that keeps it out of shot |
+| Boom vs lav | Signal-to-noise at the mic (25 dB clean, 18 dB usable), staying inside critical distance indoors. Lav when the boom can't get close, with a perspective warning for wide shots |
+
+Turn on the **sound** layer (or "plot" in the Sound section) to draw the boom operator, pole, mic pickup lobe, lav, critical-distance circle, noise-source rings and wind. Boom shadows show as red marks on the plot and in the viewfinder.
+

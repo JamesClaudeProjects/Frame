@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { compute, fmt } from './engine/engine.js';
-import { TIMES, ENVS, TONES, BLOCKING, SENSORS, APERTURES } from './engine/tables.js';
+import { TIMES, ENVS, TONES, BLOCKING, FORMATS, ASPECTS, APERTURES } from './engine/tables.js';
 import FlatLay from './components/FlatLay.jsx';
 import Viewfinder from './components/Viewfinder.jsx';
 import Readout from './components/Readout.jsx';
@@ -28,10 +28,10 @@ function Seg({ label, value, options, onChange, term }) {
 export default function App() {
   const [inp, setInp] = useState({
     time: 'golden', env: 'interior', blocking: 'one', tone: 'melancholy',
-    focal: 50, aperture: 2, aspect: '2.39:1', seed: 1,
+    focal: 50, aperture: 2, format: 's35', aspect: '2.39:1', iso: 800, shutter: 180, seed: 1,
     move: 'auto', moveAmt: 0.6, moveDur: null, support: 'auto',
   });
-  const LAYER_DEFAULTS = { fov: true, dof: true, beams: true, shadows: true, guides: true, labels: true, details: false, sound: false };
+  const LAYER_DEFAULTS = { fov: true, dof: true, beams: true, shadows: true, guides: true, labels: true, details: false, sound: false, distortion: true };
   const [layersRaw, setLayers] = usePersist('layers', LAYER_DEFAULTS);
   const layers = { ...LAYER_DEFAULTS, ...layersRaw }; // new layers appear for returning users
   const [notesOpen, setNotesOpen] = useState(false);
@@ -61,8 +61,9 @@ export default function App() {
   const pose = useMemo(() => move.poseAt(t), [move, t]);
   const metrics = useMemo(() => move.metricsAt(t), [move, t]);
   const subjectsNow = useMemo(() => move.subjectsAt(t), [move, t]);
-  const moving = move.type !== 'static' || move.support !== 'dolly';
-  const moveName = `${move.auto ? 'Auto → ' : ''}${move.label}${move.support !== 'dolly' ? ` · ${SUPPORTS[move.support]}` : ''}`;
+  const wobbly = ['steadicam', 'handheld'].includes(move.support);
+  const moving = move.type !== 'static' || wobbly;
+  const moveName = `${move.auto ? 'Auto → ' : ''}${move.label} · ${SUPPORTS[move.support]}`;
   const play = () => { if (t >= 1) setT(0); setPlaying((p) => !p); };
   const transport = moving && (
     <div className="transport">
@@ -115,7 +116,9 @@ export default function App() {
             <Seg label="Emotional Tone" term="tone" value={inp.tone} options={TONES} onChange={set('tone')} />
           </Section>
 
-          <Section id="c-lens" title="Lens" summary={`${inp.focal}mm · f/${inp.aperture} · ${inp.aspect}`}>
+          <Section id="c-lens" title="Camera & Lens" summary={`${FORMATS[inp.format].label} · ${inp.aspect} · ${inp.focal}mm f/${inp.aperture}`}>
+            <Seg label="Capture Format" term="format" value={inp.format} options={Object.fromEntries(Object.entries(FORMATS).map(([k, v]) => [k, v.label]))} onChange={set('format')} />
+            <Seg label="Aspect Ratio" term="aspect" value={inp.aspect} options={Object.fromEntries(Object.keys(ASPECTS).map((k) => [k, k]))} onChange={set('aspect')} />
             <div className="ctl">
               <div className="ctl-label"><Tip term="focal">Focal Length</Tip> <b>{inp.focal}mm</b></div>
               <input type="range" min={14} max={135} step={1} value={inp.focal} onChange={(e) => set('focal')(+e.target.value)} list="focal-marks" aria-label="Focal length" />
@@ -127,7 +130,8 @@ export default function App() {
               <input type="range" min={0} max={APERTURES.length - 1} step={1} value={apIdx} onChange={(e) => set('aperture')(APERTURES[+e.target.value])} aria-label="Aperture" />
               <div className="marks">{[1.4, 2, 2.8, 4, 5.6, 8, 11, 16].map((m) => <button type="button" key={m} onClick={() => set('aperture')(m)} className={inp.aperture === m ? 'on' : ''}>{m}</button>)}</div>
             </div>
-            <Seg label="Aspect Ratio" term="aspect" value={inp.aspect} options={Object.fromEntries(Object.keys(SENSORS).map((k) => [k, k]))} onChange={set('aspect')} />
+            <Seg label="ISO" term="iso" value={String(inp.iso)} options={{ 400: '400', 800: '800', 1600: '1600', 3200: '3200' }} onChange={(v) => set('iso')(+v)} />
+            <Seg label="Shutter (24 fps)" term="shutter" value={String(inp.shutter)} options={{ 180: '180°', 172.8: '172.8°', 90: '90°', 45: '45°' }} onChange={(v) => set('shutter')(+v)} />
           </Section>
 
           <Section id="c-move" title="Camera Move" summary={`${move.auto ? 'Auto → ' : ''}${move.label}${moving ? ` · ${fmt(move.duration, 0)} s` : ''}`}>
@@ -164,7 +168,7 @@ export default function App() {
                 <label key={k}><input type="checkbox" checked={layers[k]} onChange={() => setLayers((l) => ({ ...l, [k]: !l[k] }))} />{k}</label>
               ))}
             </div>
-            <p className="hint">“details” adds second label lines, shadow sizes and the full camera tag. Hover any fixture on the plot for its full spec.</p>
+            <p className="hint">“details” adds second label lines, shadow sizes and the full camera tag; “distortion” shows the lens’s typical barrel or pincushion in the viewfinder. Hover any fixture on the plot for its full spec.</p>
             <button className="ghost" type="button" onClick={exportSVG}>⤓ Export plot (SVG)</button>
           </Section>
         </aside>
@@ -197,14 +201,14 @@ export default function App() {
 
         <aside className="panel side">
           <h2 className="panel-title">Through the Lens</h2>
-          <Viewfinder scene={scene} cam={pose} metrics={moving ? metrics : null} transport={transport} t={t} subjects={subjectsNow} soundLayer={!!layers.sound} />
+          <Viewfinder scene={scene} cam={pose} metrics={moving ? metrics : null} transport={transport} t={t} subjects={subjectsNow} soundLayer={!!layers.sound} distortion={!!layers.distortion} />
           <Readout scene={scene} move={move} metrics={metrics} t={t} soundLayer={!!layers.sound} onSoundLayer={() => setLayers((l) => ({ ...l, sound: !l.sound }))} />
         </aside>
 
         {moving && (
           <section className="panel board">
             <Section id="m-board" title="Storyboard" summary={`5 frames · ${move.auto ? 'Auto → ' : ''}${move.label}`}>
-              <Filmstrip scene={scene} t={t} onSeek={(v) => { setPlaying(false); setT(v); }} />
+              <Filmstrip scene={scene} t={t} distortion={!!layers.distortion} onSeek={(v) => { setPlaying(false); setT(v); }} />
             </Section>
           </section>
         )}
@@ -230,7 +234,7 @@ export default function App() {
             <div className="foot">
               FOV = 2·atan(w / 2f) with w = {fmt(scene.readout.sensor.w, 2)} mm ·
               DoF via hyperfocal H = f²/(N·c) + f, c = 0.025 mm ·
-              exposure E = 250·N² / (t·ISO), ISO 800, 1/48 s
+              exposure E = 250·N² / (t·ISO), ISO {inp.iso}, {inp.shutter}° at 24 fps = 1/{fmt(1 / scene.readout.tExp, 0)} s
             </div>
           </Section>
         </section>

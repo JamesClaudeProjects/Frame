@@ -80,13 +80,28 @@ export const TONES = {
   },
 };
 
-// Horizontal × vertical gate dimensions in mm (anamorphic width is de-squeezed).
-export const SENSORS = {
-  '16:9': { w: 24.89, h: 14.0, label: 'Super 35 · 16:9 extraction', squeeze: 1, ratio: 16 / 9 },
-  '2.39:1': { w: 43.9, h: 18.37, label: 'S35 4-perf · 2× anamorphic', squeeze: 2, ratio: 2.39 },
-  '4:3': { w: 24.89, h: 18.66, label: 'Super 35 · open gate 4:3', squeeze: 1, ratio: 4 / 3 },
-  '1:1': { w: 18.66, h: 18.66, label: 'Super 35 · 1:1 crop', squeeze: 1, ratio: 1 },
+// Capture formats (what the camera records) are separate from the aspect ratio (what is
+// extracted from it). Anamorphic gate width is de-squeezed, so the monitor view and all
+// framing maths match what the audience sees.
+export const FORMATS = {
+  s35: { label: 'Super 35', long: 'Super 35 · spherical', gate: [24.89, 18.66], squeeze: 1, coc: 0.025, minFocus: 0.45 },
+  ff: { label: 'Full Frame', long: 'Full Frame · spherical', gate: [36, 24], squeeze: 1, coc: 0.03, minFocus: 0.45 },
+  ana2: { label: 'Anamorphic 2×', long: 'Anamorphic 2× · S35 4-perf', gate: [21.95, 18.6], squeeze: 2, coc: 0.025, minFocus: 0.9 },
 };
+export const ASPECTS = { '1.33:1': 4 / 3, '1.78:1': 16 / 9, '1.85:1': 1.85, '2.39:1': 2.39, '1:1': 1 };
+
+/** The extracted frame (mm, de-squeezed) for a capture format and aspect ratio. */
+export function sensorFor(format = 's35', aspect = '2.39:1') {
+  const F = FORMATS[format] ?? FORMATS.s35;
+  const a = ASPECTS[aspect] ?? 2.39;
+  const W = F.gate[0] * F.squeeze, H = F.gate[1];
+  const [w, h] = a >= W / H ? [W, W / a] : [H * a, H];
+  const native = Math.abs(a - W / H) < 0.05;
+  return {
+    w, h, ratio: a, squeeze: F.squeeze, coc: F.coc, minFocus: F.minFocus, format,
+    label: `${F.long} · ${aspect}${native ? '' : a >= W / H ? ' (top/bottom crop)' : ' (side crop)'}`,
+  };
+}
 
 export const APERTURES = [1.2, 1.4, 1.6, 1.8, 2, 2.2, 2.5, 2.8, 3.2, 3.5, 4, 4.5, 5, 5.6, 6.3, 7.1, 8, 9, 10, 11, 13, 14, 16];
 

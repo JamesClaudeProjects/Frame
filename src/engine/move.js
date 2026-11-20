@@ -20,7 +20,11 @@ export const MOVES = {
   follow: 'Follow',
 };
 
-export const SUPPORTS = { auto: 'Auto', dolly: 'Dolly / Sticks', steadicam: 'Steadicam', handheld: 'Handheld' };
+export const SUPPORTS = {
+  auto: 'Auto', tripod: 'Sticks', dolly: 'Dolly', slider: 'Slider', jib: 'Jib / Crane', steadicam: 'Steadicam / Gimbal', handheld: 'Handheld',
+};
+const TRAVEL_MOVES = ['push', 'pull', 'truck', 'arc', 'zoom', 'follow'];
+const SLIDER_MAX = 1.5; // m of usable slider travel
 
 // Tone-driven defaults: shot length (s), pedestal direction (+1 = rises into the hero frame),
 // arc direction (toward or away from the key) and dolly-zoom direction.
@@ -90,7 +94,7 @@ export function pickMove(scene, inp) {
 // Deterministic band-limited noise (sum of sines with seeded phases). Handheld adds a
 // breathing component (~0.3 Hz) and a step component (~2 Hz); Steadicam only floats.
 const WOBBLE = {
-  dolly: null,
+  dolly: null, tripod: null, slider: null, jib: null,
   steadicam: { pos: 0.015, h: 0.01, yaw: 0.25, pitch: 0.2, roll: 0.4, hz: [0.22, 0.41] },
   handheld: { pos: 0.03, h: 0.025, yaw: 0.9, pitch: 0.7, roll: 1.5, hz: [0.3, 0.9, 2.1] },
 };
@@ -236,10 +240,8 @@ export function solveMove(scene, inp) {
     rig = (e) => { const sp = subjAt(e); return { x: sp.x + off.x, y: sp.y + off.y, h: hero.height, yaw: 0, f }; };
   }
 
-  // Camera support (wobble) — explicit, or chosen by move and mood.
-  const support = inp.support && inp.support !== 'auto' ? inp.support
-    : type === 'follow' ? 'steadicam' : inp.tone === 'tense' && type !== 'pedestal' ? 'handheld' : 'dolly';
-  const wob = makeWobble(support, inp.seed);
+  // Camera support is resolved once the path is known (below); wobble is applied lazily.
+  let wob = makeWobble(null, inp.seed);
   const subjPos = (e) => (subjAt ? subjAt(e) : P);
 
   const poseAt = (t) => {
@@ -282,7 +284,7 @@ export function solveMove(scene, inp) {
       focus: cam.focus,
       f: cam.f,
       fovH: cam.fovH / DEG,
-      dof: depthOfField(cam.f, N, cam.focus),
+      dof: depthOfField(cam.f, N, cam.focus, S.coc),
       bgScale: cam.dist / bgAxis,
       // face (chin→crown ≈ 0.23 m) as a share of frame height — the usual measure of shot size
       faceSize: ((0.23 * cam.f) / (Math.hypot(cam.pos.x - sp.x, cam.pos.y - sp.y) * S.h)) * 100,
@@ -300,6 +302,22 @@ export function solveMove(scene, inp) {
   let travel = 0;
   for (let i = 1; i < path.length; i++) travel += Math.hypot(path[i].x - path[i - 1].x, path[i].y - path[i - 1].y);
   const lift = Math.abs(B.h - A.h);
+
+  // --- Camera support: what the move can physically be done on --------------------
+  const autoSupport = () => {
+    if (type === 'follow') return 'steadicam';
+    if (type === 'pedestal') return lift > 0.9 ? 'jib' : 'dolly';
+    if (inp.tone === 'tense' && ['static', 'push', 'truck'].includes(type)) return 'handheld';
+    if (['push', 'pull', 'truck'].includes(type) && travel <= SLIDER_MAX) return 'slider';
+    if (TRAVEL_MOVES.includes(type)) return 'dolly';
+    return 'tripod';
+  };
+  let support = inp.support && inp.support !== 'auto' ? inp.support : autoSupport();
+  const fallback = (why) => { const alt = autoSupport(); notes.push(`${SUPPORTS[support]} ${why} — using ${SUPPORTS[alt].toLowerCase()} instead`); support = alt; };
+  if (support === 'tripod' && (TRAVEL_MOVES.includes(type) || type === 'pedestal')) fallback("can't travel");
+  else if (support === 'slider' && (!['push', 'pull', 'truck'].includes(type) || travel > SLIDER_MAX)) fallback(type === 'pedestal' || type === 'arc' || type === 'follow' ? `can't do ${/^[aeiou]/i.test(MOVES[type]) ? 'an' : 'a'} ${MOVES[type].toLowerCase()}` : `only covers ~${SLIDER_MAX} m (this move travels ${fmt(travel, 1)} m)`);
+  else if (support === 'jib' && ['follow', 'arc', 'zoom'].includes(type)) fallback(`isn't practical for ${/^[aeiou]/i.test(MOVES[type]) ? 'an' : 'a'} ${MOVES[type].toLowerCase()}`);
+  wob = makeWobble(support, inp.seed);
   const pathLen = Math.hypot(travel, lift);
   const speedAvg = pathLen / duration;
   const speedPeak = speedAvg * 1.5;
@@ -324,6 +342,10 @@ export function solveMove(scene, inp) {
   // Practicality / gear.
   const gear = [];
   const tracked = support === 'dolly';
+  if (support === 'tripod') gear.push('Sticks (tripod) with a fluid head — locked off');
+  if (support === 'slider') gear.push(`Slider, ${fmt(travel, 2)} m of ${fmt(SLIDER_MAX, 1)} m usable travel${travel > 0.05 ? `, ${fmt(speedPeak, 2)} m/s peak` : ''}`);
+  if (support === 'jib') gear.push(type === 'pedestal' ? (lift <= 2.5 ? `Jib arm, ${fmt(lift, 2)} m of vertical travel` : `Crane / Technocrane, ${fmt(lift, 2)} m of vertical travel`) : 'Jib arm holding the position (remote or riding head)');
+  if (support === 'dolly' && type === 'static') gear.push('Dolly parked as a stable platform (no track)');
   if (['push', 'pull', 'truck', 'zoom'].includes(type) && tracked) {
     const track = travel + 1.2;
     gear.push(`Dolly on ≈ ${fmt(track)} m of straight track (${Math.ceil(track / 2.44)} × 8 ft sections)`);
@@ -342,7 +364,7 @@ export function solveMove(scene, inp) {
     if (speedPeak > 1.2) notes.push(`Peak ${fmt(speedPeak, 2)} m/s is fast for a dolly — lengthen the shot or use a vehicle/remote head`);
     else if (speedPeak < 0.06 && travel > 0.05) notes.push(`Peak ${fmt(speedPeak * 100, 0)} cm/s is a crawl — a motorised slider holds this steadier than a grip`);
   }
-  if (type === 'pedestal') {
+  if (type === 'pedestal' && support !== 'jib') {
     gear.push(lift <= 0.9 ? `Dolly column / pedestal (${fmt(lift, 2)} m stroke ≤ 0.9 m)` : lift <= 2.5 ? `Jib arm (${fmt(lift, 2)} m vertical exceeds a dolly column)` : `Crane / Technocrane (${fmt(lift, 2)} m vertical)`);
     if (speedPeak > 0.6) notes.push(`Boom peaks at ${fmt(speedPeak, 2)} m/s — fast enough to read as a swoop, not a drift`);
   }
@@ -361,7 +383,7 @@ export function solveMove(scene, inp) {
     subjPath: subjAt ? [...Array(25)].map((_, i) => subjAt(i / 24)) : null,
     start, end, rack, arc, zoom, follow, lineCross, conflicts, notes, gear,
     conflictsAt: (t) => checkLights(scene, poseAt, [t], duration),
-    theory: type === 'static' && support === 'dolly' && !auto ? null : synthesizeMove({ type, A, B, start, end, duration, travel, lift, speedPeak, rack, arc, zoom, follow, auto, support, lineCross, conflicts, scene, inp }),
+    theory: type === 'static' && !['steadicam', 'handheld'].includes(support) && !auto ? null : synthesizeMove({ type, A, B, start, end, duration, travel, lift, speedPeak, rack, arc, zoom, follow, auto, support, lineCross, conflicts, scene, inp }),
   };
 }
 

@@ -17,7 +17,7 @@ export default function Readout({ scene, move, metrics, soundLayer, onSoundLayer
   const neg = L.find((l) => l.role === 'neg');
   const pr = L.filter((l) => l.role === 'practical' && l.lit);
   const softTxt = r.key.soft > 0.6 ? 'soft' : r.key.soft > 0.25 ? 'semi-soft' : r.key.soft > 0.05 ? 'crisp' : 'hard';
-  const moving = move && (move.type !== 'static' || move.support !== 'dolly');
+  const moving = move && (move.type !== 'static' || ['steadicam', 'handheld'].includes(move.support));
   const warnings = move ? [...move.conflicts.map((c) => c.note), ...(move.lineCross ? [`Crosses the 180° line at ${fmt(move.lineCross.t * move.duration, 1)} s`] : [])] : [];
   const ratioRead = r.ratio >= 6 ? 'chiaroscuro — the shadow side falls toward black' : r.ratio >= 3 ? 'sculpted but readable' : 'open and soft';
 
@@ -43,7 +43,7 @@ export default function Readout({ scene, move, metrics, soundLayer, onSoundLayer
           <Tip term="ratio" extra={`Here: the lit side is ${fmt(r.stops)} stops brighter than the shadow side — ${ratioRead}.`}>
             <span className="big">{r.ratioStr}</span>
           </Tip>
-          <div className="cap">Key : Fill</div>
+          <div className="cap">Key : Fill · <Tip term="meter">meter {fmt(r.keyLux, 0)} / {fmt(r.fillLux, 0)} lx</Tip></div>
         </div>
         <div className="ratio-meter">
           <div className="rm-bar" aria-hidden="true">
@@ -104,7 +104,7 @@ export default function Readout({ scene, move, metrics, soundLayer, onSoundLayer
         <Section
           id="r-move"
           title={`Camera move · ${move.auto ? 'Auto → ' : ''}${move.label}`}
-          summary={`${fmt(move.duration, 1)} s${move.travel > 0.05 ? ` · ${fmt(move.travel, 1)} m` : ''}${move.support !== 'dolly' ? ` · ${move.support}` : ''}`}
+          summary={`${fmt(move.duration, 1)} s${move.travel > 0.05 ? ` · ${fmt(move.travel, 1)} m` : ''} · ${move.support}`}
           defaultOpen={false}
         >
           <table className="stats move-table">
@@ -125,7 +125,7 @@ export default function Readout({ scene, move, metrics, soundLayer, onSoundLayer
 
       <Section
         id="r-lens"
-        title="Lens & exposure"
+        title="Camera dept · lens & exposure"
         summary={`${fmt(r.fovH, 0)}° view · DoF ${dofStr(r.dof)}${r.ndText && r.ndText.startsWith('ND') ? ` · ${r.ndText.split(' (')[0]}` : ''}`}
         defaultOpen={false}
       >
@@ -136,7 +136,9 @@ export default function Readout({ scene, move, metrics, soundLayer, onSoundLayer
             <tr><th><Tip term="nearFar" extra={`Hyperfocal here: ${fmt(r.dof.hyper, 1)} m.`}>Near → far</Tip></th><td colSpan={3}>{fmt(r.dof.near, 2)} m → {Number.isFinite(r.dof.far) ? fmt(r.dof.far, 2) + ' m' : '∞'}</td></tr>
             <tr><th><Tip term="bgBlur">BG blur</Tip></th><td>{fmt(r.bgBlurPct, 1)}%</td><th><Tip term="bgScale">BG scale</Tip></th><td>{fmt(r.bgScale * 100, 0)}%</td></tr>
             <tr><th><Tip term="camera">Camera</Tip></th><td colSpan={3}>{fmt(r.camH, 2)} m high · {r.tiltDeg >= 0 ? 'up' : 'down'} {fmt(Math.abs(r.tiltDeg))}°{r.dutch ? ` · dutch ${fmt(Math.abs(r.dutch))}°` : ''}</td></tr>
-            {r.noseMag > 4 && <tr><th><Tip term="distortion">Distortion</Tip></th><td colSpan={3}>nose +{fmt(r.noseMag, 0)}% vs ears</td></tr>}
+            <tr><th><Tip term="lensDist">Lens distortion</Tip></th><td colSpan={3}>{Math.abs(r.distortion.edgePct) < 0.3 ? 'negligible' : `${r.distortion.edgePct < 0 ? 'barrel' : 'pincushion'} ~${fmt(Math.abs(r.distortion.edgePct), 1)}% at frame edge`}{r.sensor.squeeze > 1 ? ' · anamorphic' : ''}</td></tr>
+            {r.noseMag > 4 && <tr><th><Tip term="distortion">Close-lens perspective</Tip></th><td colSpan={3}>nose +{fmt(r.noseMag, 0)}% vs ears</td></tr>}
+            <tr><th><Tip term="iso">Exposure</Tip></th><td colSpan={3}>ISO {r.iso} · {r.shutter}° @ 24 fps (1/{fmt(1 / r.tExp, 0)} s) · f/{scene.inp.aperture}</td></tr>
             <tr><th><Tip term="keyLevel">Key level</Tip></th><td>{fmt(r.keyLux, 0)} lx</td><th><Tip term="fillLevel">Fill</Tip></th><td>{fmt(r.fillLux, 0)} lx</td></tr>
             {r.rimLux != null && <tr><th><Tip term="rimLevel">Rim level</Tip></th><td colSpan={3}>{fmt(r.rimLux, 0)} lx</td></tr>}
             {r.ndText && <tr><th><Tip term="nd">Filtration</Tip></th><td colSpan={3}>{r.ndText}</td></tr>}
@@ -146,7 +148,7 @@ export default function Readout({ scene, move, metrics, soundLayer, onSoundLayer
 
       <Section
         id="r-light"
-        title="Key light geometry"
+        title="Lighting dept · key"
         summary={`${fmt(r.key.off, 0)}° around · ${fmt(r.key.elev, 0)}° up · ${softTxt}`}
         defaultOpen={false}
       >
@@ -188,7 +190,7 @@ function SoundSection({ s, soundLayer, onSoundLayer, t, duration }) {
   return (
     <Section
       id="r-sound"
-      title="Sound"
+      title="Sound dept"
       summary={s.summary}
       defaultOpen={false}
       aside={<button type="button" className={`mini-toggle${soundLayer ? ' on' : ''}`} aria-pressed={soundLayer} onClick={onSoundLayer} title="Show the sound plan on the lighting plot">{soundLayer ? '◉' : '○'} plot</button>}

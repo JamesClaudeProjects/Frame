@@ -63,7 +63,7 @@ const FlatLay = forwardRef(function FlatLay({ scene, layers, cam: camPose, t = 1
   const conflictsNow = new Set(scene.move ? scene.move.conflictsAt(t).map((c) => c.id) : []);
   const gridStep = [0.5, 1, 2, 5, 10].find((s) => s * k >= 30) ?? 10;
   const inv0 = inv(0, 0), inv1 = inv(W, H);
-  const dof = depthOfField(cam.f, cam.N, cam.focus ?? scene.P.y);
+  const dof = depthOfField(cam.f, cam.N, cam.focus ?? scene.P.y, cam.sensor.coc);
   const focusY = cp.y + (cam.focus ?? scene.P.y);
   const yToS = (y) => T({ x: 0, y }).y;
   const wb = scene.readout.wb;

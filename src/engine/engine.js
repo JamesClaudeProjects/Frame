@@ -2,7 +2,7 @@
 // World space: metres, camera at the origin looking down +Y, +X to camera-right.
 // Angles are radians in the XY plane (atan2 convention).
 
-import { TIMES, ENVS, TONES, SENSORS, NEON } from './tables.js';
+import { TIMES, ENVS, TONES, NEON, sensorFor } from './tables.js';
 import { solveMove, fixtureName } from './move.js';
 import { solveSound, trackSoundMove } from './sound.js';
 import { renderKelvin, shiftKelvin, nearestGel, mired, describeShift } from './color.js';
@@ -50,9 +50,9 @@ function rayRect(p, a, r) {
 
 export const COC = 0.025; // mm, Super 35 circle of confusion
 
-export function depthOfField(fmm, N, sM) {
+export function depthOfField(fmm, N, sM, coc = COC) {
   const s = sM * 1000;
-  const H = (fmm * fmm) / (N * COC) + fmm;
+  const H = (fmm * fmm) / (N * coc) + fmm;
   const near = (s * (H - fmm)) / (H + s - 2 * fmm);
   const far = s < H ? (s * (H - fmm)) / (H - s) : Infinity;
   return { near: near / 1000, far: far / 1000, hyper: H / 1000, total: (far - near) / 1000 };
@@ -67,17 +67,38 @@ export function blurDisc(fmm, N, sM, xM) {
 
 /** Pinhole projection of a world point (x, y, height h) to normalised frame coords (0..1, y down). */
 export function project(cam, pt, h) {
+  return camToFrame(cam, toCamera(cam, pt, h));
+}
+
+/** World point → camera space (x right, y up, z along the lens axis). */
+export function toCamera(cam, pt, h) {
   // yaw: rotation of the lens axis from +Y toward +X (0 = looking straight down the set)
   const yaw = cam.yaw || 0, cy = Math.cos(yaw), sy = Math.sin(yaw);
   const wx = pt.x - cam.pos.x, wz = pt.y - cam.pos.y, dy = h - cam.height;
   const dx = wx * cy - wz * sy, dz = wx * sy + wz * cy;
   const cp = Math.cos(cam.pitch), sp = Math.sin(cam.pitch);
-  const zc = dz * cp + dy * sp;
-  const yc = dy * cp - dz * sp;
-  if (zc <= 0.05) return null;
-  const u = (cam.f * dx) / zc / cam.sensor.w;
-  const v = (cam.f * yc) / zc / cam.sensor.h;
-  return { x: 0.5 + u, y: 0.5 - v, z: zc };
+  return { x: dx, y: dy * cp - dz * sp, z: dz * cp + dy * sp };
+}
+
+/** Camera space → normalised frame (0..1, y down); null behind the lens. */
+export function camToFrame(cam, c) {
+  if (c.z <= 0.05) return null;
+  const u = (cam.f * c.x) / c.z / cam.sensor.w;
+  const v = (cam.f * c.y) / c.z / cam.sensor.h;
+  return { x: 0.5 + u, y: 0.5 - v, z: c.z };
+}
+
+/**
+ * Typical radial distortion for this lens on this format, as k1 in r' = r(1 + k1·r²) with
+ * r = 1 at the frame's horizontal edge. Wide rectilinear primes barrel (k1 < 0), long
+ * lenses pincushion slightly, anamorphics add barrel. Representative, not lens-specific.
+ */
+export function lensDistortion(sensor, f) {
+  const fovH = (2 * Math.atan(sensor.w / (2 * f)) * 180) / Math.PI;
+  let edge = -4 * clamp((fovH - 55) / 45, 0, 1.5); // % at the horizontal edge
+  if (fovH < 15) edge = 0.8;
+  if (sensor.squeeze > 1) edge -= 1.5;
+  return { k1: edge / 100, edgePct: edge };
 }
 
 // --- Main solve -------------------------------------------------------------
@@ -85,7 +106,7 @@ export function project(cam, pt, h) {
 export function compute(inp) {
   const rng = mulberry32(inp.seed * 7919 + 17);
   const J = (r) => (rng() * 2 - 1) * r;
-  const T = TIMES[inp.time], E = ENVS[inp.env], M = TONES[inp.tone], S = SENSORS[inp.aspect];
+  const T = TIMES[inp.time], E = ENVS[inp.env], M = TONES[inp.tone], S = sensorFor(inp.format, inp.aspect);
   const f = inp.focal, N = inp.aperture, blocking = inp.blocking;
   const wb = T.wb;
   const notes = [];
@@ -518,7 +539,7 @@ export function compute(inp) {
   });
   if (key.modifier === 'silk') subjects.forEach((s) => shadows.push({ from: V(s.x, s.y), dir: keyAz + Math.PI, length: 0.35, penumbra: 0.4, opacity: 0.22, elev: 78, light: 'key' }));
 
-  const dof = depthOfField(f, N, P.y);
+  const dof = depthOfField(f, N, P.y, S.coc);
   const bgBlur = blurDisc(f, N, P.y, bgY);
   const bgBlurPct = (bgBlur / S.h) * 100;
   const fgBlurPct = (blurDisc(f, N, P.y, Math.max(0.3, P.y * 0.5)) / S.h) * 100;
@@ -531,7 +552,14 @@ export function compute(inp) {
   const tiltDeg = pitch / DEG;
 
   // --- Exposure --------------------------------------------------------------
-  const keyLux = 15 * N * N; // incident lux for correct exposure at ISO 800, 1/48s (C = 250)
+  // Incident-meter exposure: E = C·N² / (t·ISO), C = 250, t = shutter angle / 360 / fps.
+  const iso = inp.iso ?? 800, shutter = inp.shutter ?? 180, fps = 24;
+  const tExp = shutter / 360 / fps;
+  const keyLux = (250 * N * N) / (tExp * iso);
+  // Mains-powered practicals flicker at 100 Hz in 50 Hz countries; 180° at 24 fps beats with it.
+  const mainsPracs = lights.some((l) => l.role === 'practical' && l.lit && ['neon', 'streetlamp', 'lamp'].includes(l.modifier));
+  if (mainsPracs && Math.abs(shutter - 180) < 1) notes.push('Practicals on 50 Hz mains can flicker at 24 fps / 180° — shoot 172.8° in 50 Hz countries (180° is fine at 60 Hz)');
+  if (P.y < S.minFocus) notes.push(`Subject at ${fmt(P.y, 2)} m is inside the ${S.squeeze > 1 ? 'anamorphic' : 'lens'} close-focus limit (~${S.minFocus} m) — use a diopter or step back`);
   let available = null;
   if (key.modifier === 'sun') available = T.sunLux;
   else if (key.modifier === 'silk') available = T.sunLux * 0.25;
@@ -573,7 +601,7 @@ export function compute(inp) {
     gelPush: nearestGel(M.mired),
     fovH: fovH / DEG, fovV: fovV / DEG, ffEq, D: P.y, dof, bgBlurPct, fgBlurPct, bgScale, noseMag,
     negSpace, headroom, pCenterX, pHeight, tiltDeg, camH, dutch,
-    keyLux, fillLux: keyLux / ratio, rimLux: rim && rim.stops != null ? keyLux * Math.pow(2, rim.stops) : null,
+    keyLux, fillLux: keyLux / ratio, iso, shutter, fps, tExp, distortion: lensDistortion(S, f), rimLux: rim && rim.stops != null ? keyLux * Math.pow(2, rim.stops) : null,
     ndText, unitText, sep, proxemics: blocking === 'two' ? proxemic(sep) : null,
     shadow: shadows.find((x) => x.light === 'key') ?? shadows[0], sensor: S,
   };

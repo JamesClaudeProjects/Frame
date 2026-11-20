@@ -6,7 +6,7 @@ const FRAMES = [0, 0.25, 0.5, 0.75, 1];
 
 // Storyboard: the move rendered through the lens at evenly spaced beats, with the numbers
 // a crew needs on each panel. Panels are real projections, not thumbnails of the live view.
-export default function Filmstrip({ scene, t, onSeek }) {
+export default function Filmstrip({ scene, t, onSeek, distortion = true }) {
   const move = scene.move;
   const stripRef = useRef(null);
   const frames = useMemo(() => FRAMES.map((ft) => {
@@ -97,7 +97,7 @@ export default function Filmstrip({ scene, t, onSeek }) {
       <div className="fs-row" ref={stripRef}>
         {frames.map((f, i) => (
           <button type="button" key={f.t} className={`fs-panel${nearest === f.t ? ' on' : ''}`} onClick={() => onSeek(f.t)} title="Jump to this frame">
-            <Viewfinder scene={scene} cam={f.cam} subjects={f.subjects} t={f.t} uid={`fs${i}`} bare />
+            <Viewfinder scene={scene} cam={f.cam} subjects={f.subjects} t={f.t} uid={`fs${i}`} bare distortion={distortion} />
             <div className="fs-cap"><b>{i + 1}</b> {caption(f)}</div>
             <div className="fs-cap dim">{extra(f)}</div>
             {f.warn.length > 0 && <div className="fs-cap warn">⚠ {f.warn.join(', ')}</div>}

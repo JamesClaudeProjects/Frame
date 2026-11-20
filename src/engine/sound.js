@@ -401,8 +401,9 @@ export function trackSoundMove(scene, inp) {
     const rig = [];
     const moving = camSpeed > 0.08; // ignore handheld/Steadicam float
     if (moving && mv.support === 'dolly' && mv.travel > 0.05) rig.push({ name: 'dolly wheels / track', l1: clamp(30 + 20 * Math.log10(camSpeed / 0.3), 20, 42), at: V3(cam.pos.x, cam.pos.y, 0.3) });
-    if (moving && mv.support !== 'dolly') rig.push({ name: `${mv.support === 'steadicam' ? 'Steadicam' : 'handheld'} operator footsteps`, l1: 42 + foot, at: V3(cam.pos.x, cam.pos.y, 0.1) });
-    if (mv.type === 'pedestal' && mv.lift > 0.9 && moving) rig.push({ name: 'jib / crane', l1: 30, at: V3(cam.pos.x, cam.pos.y, 1) });
+    if (moving && mv.support === 'slider') rig.push({ name: 'slider carriage', l1: 24, at: V3(cam.pos.x, cam.pos.y, 1) });
+    if (moving && ['steadicam', 'handheld'].includes(mv.support)) rig.push({ name: `${mv.support === 'steadicam' ? 'Steadicam' : 'handheld'} operator footsteps`, l1: 42 + foot, at: V3(cam.pos.x, cam.pos.y, 0.1) });
+    if (mv.support === 'jib' && moving) rig.push({ name: 'jib / crane', l1: 30, at: V3(cam.pos.x, cam.pos.y, 1) });
     if (mv.type === 'zoom' && moving) rig.push({ name: 'zoom motor', l1: 26, at: V3(cam.pos.x, cam.pos.y, cam.height) });
     if (subSpeed > 0.05) rig.push({ name: 'subject footsteps', l1: 44 + foot, at: V3(subs[0].x, subs[0].y, 0.05), subject: true });
     if (opSpeed > 0.15) rig.push({ name: 'boom operator footsteps', l1: 40 + foot, at: V3(pick.op.x, pick.op.y, 0.05) });

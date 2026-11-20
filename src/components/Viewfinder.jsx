@@ -1,5 +1,5 @@
 import React from 'react';
-import { project, blurDisc, fixtureHeight, fmt } from '../engine/engine.js';
+import { toCamera, camToFrame, lensDistortion, blurDisc, fixtureHeight, fmt } from '../engine/engine.js';
 import { Tip } from './ui.jsx';
 import { boomAt } from '../engine/sound.js';
 
@@ -10,16 +10,27 @@ const SKY = {
 const GROUND = { grass: '#1e281a', asphalt: '#1d1e22', wet: '#121119', floor: '#2a221d', void: '#060607' };
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 
-export default function Viewfinder({ scene, cam: camPose, metrics, transport, t = 1, subjects: subjOverride, uid = 'vf', bare = false, width, soundLayer = false }) {
+export default function Viewfinder({ scene, cam: camPose, metrics, transport, t = 1, subjects: subjOverride, uid = 'vf', bare = false, width, soundLayer = false, distortion = true }) {
   const U = (id) => `${uid}-${id}`;
   const subjects = subjOverride ?? scene.subjects;
   const cam = camPose ?? scene.camera;
   const S = cam.sensor;
   const VW = 560, VH = Math.round(VW / S.ratio);
-  const P = (pt, h) => {
-    const p = project(cam, pt, h);
-    return p && { x: p.x * VW, y: p.y * VH, z: p.z };
+  // Projection: world → camera space → frame, then the lens's radial distortion.
+  const dist = distortion ? lensDistortion(S, cam.f).k1 : 0;
+  const toScreen = (f) => {
+    if (!f) return null;
+    let { x, y } = f;
+    if (dist) {
+      const u = (x - 0.5) * 2, v = ((y - 0.5) * 2) / S.ratio;
+      // The polynomial only describes the lens inside (and just past) the image circle; far
+      // off-frame points are scaled uniformly so the mapping never folds back on itself.
+      const k = 1 + dist * Math.min(u * u + v * v, 2.6);
+      x = 0.5 + (u * k) / 2; y = 0.5 + (v * k * S.ratio) / 2;
+    }
+    return { x: x * VW, y: y * VH, z: f.z };
   };
+  const P = (pt, h) => toScreen(camToFrame(cam, toCamera(cam, pt, h)));
   const time = scene.inp.time;
   const blurPx = (zM) => clamp((blurDisc(cam.f, cam.N, cam.focus ?? scene.P.y, zM) / S.h) * VH * 0.5, 0, 18);
   const bgBlur = blurPx(scene.bgY - cam.pos.y);
@@ -28,11 +39,32 @@ export default function Viewfinder({ scene, cam: camPose, metrics, transport, t 
   const hz = P({ x: cam.pos.x + Math.sin(cam.yaw || 0) * 5000, y: cam.pos.y + Math.cos(cam.yaw || 0) * 5000 }, cam.height);
   const horizonY = hz ? hz.y : -1000;
 
-  const poly = (pts) => {
-    const q = pts.filter(Boolean);
-    return q.length > 2 ? q.map((p) => `${p.x},${p.y}`).join(' ') : null;
+  // Polygon in world space → clipped at the lens (near plane) → screen. Edges are
+  // subdivided so walls bend correctly under lens distortion.
+  const NEAR = 0.1;
+  const polyC = (pts3, steps = 14) => {
+    const dense = [];
+    pts3.forEach((a, i) => {
+      const b = pts3[(i + 1) % pts3.length];
+      for (let j = 0; j < steps; j++) {
+        const t = j / steps;
+        dense.push(toCamera(cam, { x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t }, a.h + (b.h - a.h) * t));
+      }
+    });
+    const out = [];
+    dense.forEach((c, i) => {
+      const n = dense[(i + 1) % dense.length];
+      const cin = c.z >= NEAR, nin = n.z >= NEAR;
+      if (cin) out.push(c);
+      if (cin !== nin) {
+        const t = (NEAR - c.z) / (n.z - c.z);
+        out.push({ x: c.x + (n.x - c.x) * t, y: c.y + (n.y - c.y) * t, z: NEAR });
+      }
+    });
+    const scr = out.map((c) => toScreen(camToFrame(cam, c))).filter(Boolean);
+    return scr.length > 2 ? scr.map((p) => `${p.x},${p.y}`).join(' ') : null;
   };
-  const line3 = (a, ha, b, hb, n = 24) => {
+  const line3 = (a, ha, b, hb, n = 40) => {
     const out = [];
     for (let i = 0; i <= n; i++) {
       const t = i / n;
@@ -41,47 +73,52 @@ export default function Viewfinder({ scene, cam: camPose, metrics, transport, t 
     }
     return out.length > 1 ? out.join(' ') : null;
   };
+  const W3 = (x, y, h) => ({ x, y, h });
 
-  // background / set
+  // background / set — geometry starts behind the camera and is clipped at the lens,
+  // so it stays correct wherever the camera moves.
   const bg = [];
   const kind = scene.set.kind;
   const far = Math.min(scene.bgY, 60);
+  const near = cam.pos.y - 3;
   if (kind !== 'studio') {
     for (let x = -12; x <= 12; x += 1) {
-      const d = line3({ x, y: 0.4 }, 0, { x, y: far }, 0);
+      const d = line3({ x, y: near }, 0, { x, y: far }, 0);
       if (d) bg.push(<polyline key={'gx' + x} points={d} className="vf-grid" />);
     }
-    for (let y = 1; y <= far; y += y < 10 ? 1 : 5) {
-      const d = line3({ x: -14, y }, 0, { x: 14, y }, 0, 6);
+    for (let y = Math.ceil(near); y <= far; y += y < 10 ? 1 : 5) {
+      const d = line3({ x: -14, y }, 0, { x: 14, y }, 0, 16);
       if (d) bg.push(<polyline key={'gy' + y} points={d} className="vf-grid" />);
     }
   }
   if (kind === 'interior') {
-    const x0 = scene.set.walls[0][0], x1 = scene.set.walls[0][2], by = scene.set.walls[1][3];
-    const back = poly([P({ x: x0, y: by }, 0), P({ x: x1, y: by }, 0), P({ x: x1, y: by }, 2.9), P({ x: x0, y: by }, 2.9)]);
-    const left = poly([P({ x: x0, y: 0.3 }, 0), P({ x: x0, y: by }, 0), P({ x: x0, y: by }, 2.9), P({ x: x0, y: 0.3 }, 2.9)]);
-    const right = poly([P({ x: x1, y: 0.3 }, 0), P({ x: x1, y: by }, 0), P({ x: x1, y: by }, 2.9), P({ x: x1, y: 0.3 }, 2.9)]);
+    const x0 = scene.set.walls[0][0], x1 = scene.set.walls[0][2], y0 = scene.set.walls[0][1], by = scene.set.walls[1][3], Hc = 2.8;
+    const ceil = polyC([W3(x0, y0, Hc), W3(x1, y0, Hc), W3(x1, by, Hc), W3(x0, by, Hc)]);
+    const left = polyC([W3(x0, y0, 0), W3(x0, by, 0), W3(x0, by, Hc), W3(x0, y0, Hc)]);
+    const right = polyC([W3(x1, y0, 0), W3(x1, by, 0), W3(x1, by, Hc), W3(x1, y0, Hc)]);
+    const back = polyC([W3(x0, by, 0), W3(x1, by, 0), W3(x1, by, Hc), W3(x0, by, Hc)]);
+    ceil && bg.push(<polygon key="ceil" points={ceil} fill="#141212" stroke="#3a3d45" strokeWidth="1" />);
     [left, right].forEach((d, i) => d && bg.push(<polygon key={'sw' + i} points={d} fill="#1d1a1a" stroke="#575b66" strokeWidth="1" />));
     back && bg.push(<polygon key="bw" points={back} fill="#221e1c" stroke="#6b707c" strokeWidth="1" />);
     scene.set.windows.forEach((w, i) => {
       const h = w.len / 2;
       const a = w.axis === 'x' ? { x: w.center.x, y: w.center.y - h } : { x: w.center.x - h, y: w.center.y };
       const b = w.axis === 'x' ? { x: w.center.x, y: w.center.y + h } : { x: w.center.x + h, y: w.center.y };
-      const d = poly([P(a, 0.9), P(b, 0.9), P(b, 2.3), P(a, 2.3)]);
+      const d = polyC([W3(a.x, a.y, 0.9), W3(b.x, b.y, 0.9), W3(b.x, b.y, 2.3), W3(a.x, a.y, 2.3)], 6);
       const lt = scene.lights.find((l) => l.modifier === 'window' && Math.abs(l.pos.x - w.center.x) < 0.01 && Math.abs(l.pos.y - w.center.y) < 0.01);
       d && bg.push(<polygon key={'win' + i} points={d} fill={lt?.color ?? '#cfe8ff'} opacity="0.75" stroke="#fff" strokeWidth="1" />);
     });
   } else if (kind === 'alley') {
     scene.set.walls.forEach(([x], i) => {
-      const d = poly([P({ x, y: 0.4 }, 0), P({ x, y: far + 8 }, 0), P({ x, y: far + 8 }, 9), P({ x, y: 0.4 }, 9)]);
+      const d = polyC([W3(x, near, 0), W3(x, far + 8, 0), W3(x, far + 8, 9), W3(x, near, 9)], 24);
       d && bg.push(<polygon key={'aw' + i} points={d} fill="#17181c" stroke="#4d525c" strokeWidth="1" />);
-      for (let y = 2; y < far + 8; y += 2.5) {
-        const ln = line3({ x, y }, 0, { x, y }, 9, 2);
+      for (let y = Math.ceil(near / 2.5) * 2.5; y < far + 8; y += 2.5) {
+        const ln = line3({ x, y }, 0, { x, y }, 9, 8);
         ln && bg.push(<polyline key={'awl' + i + y} points={ln} stroke="#2b2e35" strokeWidth="1" fill="none" />);
       }
     });
   } else if (kind === 'neon') {
-    const d = poly([P({ x: -30, y: scene.bgY }, 0), P({ x: 30, y: scene.bgY }, 0), P({ x: 30, y: scene.bgY }, 7), P({ x: -30, y: scene.bgY }, 7)]);
+    const d = polyC([W3(-30, scene.bgY, 0), W3(30, scene.bgY, 0), W3(30, scene.bgY, 7), W3(-30, scene.bgY, 7)], 20);
     d && bg.push(<polygon key="fac" points={d} fill="#15131b" stroke="#3f3a4d" />);
   } else if (kind === 'field') {
     const pts = [];
@@ -259,7 +296,7 @@ export default function Viewfinder({ scene, cam: camPose, metrics, transport, t 
     <div className="vf-wrap">
       {svgEl}
       <div className="vf-hud">
-        <span className="vf-lens">{fmt(cam.f, 0)}mm · f/{cam.N} · {scene.inp.aspect}</span>
+        <span className="vf-lens">{fmt(cam.f, 0)}mm · f/{cam.N} · {scene.inp.aspect}{S.squeeze > 1 ? ' · de-squeezed' : ''}</span>
         <Tip term="tilt"><span>tilt {r.tiltDeg >= 0 ? '+' : ''}{fmt(r.tiltDeg)}°</span></Tip>
         {Math.abs(cam.dutch) > 0.3 ? <Tip term="dutch"><span>dutch {fmt(cam.dutch)}°</span></Tip> : null}
         <Tip term="negSpace"><span>space {fmt(r.negSpace, 0)}%</span></Tip>

@@ -9,7 +9,12 @@ export const GLOSSARY = {
   tone: { title: 'Emotional tone', body: 'Drives the contrast ratio, camera height and tilt, how much empty space surrounds the subject, gel colour bias and which camera moves are favoured.' },
   focal: { title: 'Focal length', body: 'Longer lenses see a narrower view and sit further back for the same shot size, which compresses the background. Wider lenses sit closer and exaggerate depth.' },
   aperture: { title: 'Aperture (f-stop)', body: 'Lower numbers (f/1.4) give a thin slice of focus and need less light; higher numbers (f/11) keep more in focus and need much more light.' },
-  aspect: { title: 'Aspect ratio', body: 'Frame shape. 2.39:1 uses a 2× anamorphic squeeze, so the same focal length sees a much wider horizontal view than 16:9.' },
+  aspect: { title: 'Aspect ratio', body: 'The frame shape extracted from the sensor. Wider ratios crop the top and bottom of the gate; narrower ones crop the sides.' },
+  format: { title: 'Capture format', body: 'What the camera records. Full Frame sees wider than Super 35 at the same focal length. Anamorphic 2× squeezes a wide image onto the sensor; the monitor shows it de-squeezed, a 50mm sees as wide as a 25mm spherical, close focus is ~0.9 m, bokeh is oval and flares streak horizontally.' },
+  iso: { title: 'ISO & exposure', body: 'Sensitivity. Higher ISO needs less light on the face for the same aperture; every doubling halves the key level the gaffer must deliver.' },
+  shutter: { title: 'Shutter angle', body: '180° at 24 fps is 1/48 s, the normal motion blur. Narrower angles crisp up motion and need more light. Use 172.8° in 50 Hz countries to stop mains-powered practicals flickering.' },
+  meter: { title: 'Meter readings', body: 'What an incident meter should read at the face: key side and fill side. This is how the gaffer actually sets the ratio.' },
+  lensDist: { title: 'Lens distortion', body: 'Typical radial distortion for this focal length and format: wide rectilinear primes barrel (straight lines bow outward near the edges), long lenses pincushion slightly, anamorphics add barrel. Representative values, not a specific lens set.' },
   variation: { title: 'Variation', body: 'Re-rolls subject offsets, light angles, crowd positions and (on Auto) the camera move, while keeping the mood’s rules. The same number always gives the same result.' },
 
   // --- Lighting
@@ -48,7 +53,7 @@ export const GLOSSARY = {
 
   // --- Moves
   move: { title: 'Camera move', body: 'How the camera travels during the shot. Auto lets the mood pick; each move ends (or starts) on the composed hero frame.' },
-  support: { title: 'Camera support', body: 'What holds the camera. Dolly is smooth; Steadicam floats; handheld adds breathing and footsteps. Auto chooses from the move and mood.' },
+  support: { title: 'Camera support', body: 'What holds the camera. Sticks are locked off; a slider covers short moves (~1.5 m); a dolly on track handles longer ones; a jib or crane handles height; Steadicam/gimbal floats; handheld breathes. Impossible pairings are corrected with a note.' },
   travel: { title: 'Move size', body: 'How far the move goes. It is trimmed automatically when walls or the lens range would not allow it.' },
   shotLength: { title: 'Shot length', body: 'How long the move takes in real time. Speed and the per-frame checks are based on it.' },
   keyOff: { title: 'Key ↔ lens angle', body: 'Angle between key and camera, seen from the subject. Small means frontal, broad light; near 90° or more means side or edge light.' },
